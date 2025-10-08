@@ -16,7 +16,10 @@ Interfacing with the Growatt Inverter is done using the PyPi library:
 * [github](https://github.com/indykoning/PyPi_GrowattServer)
 
 ## Usage
-This software was written to be used as a docker image (paths to config & output locations have been hardcoded), but if you wish you can download the entire repo and just use the scripts as you wish.
+This software can be run either as a Docker container or directly from the source code. Log files are written to:
+- When running in Docker: `/opt/growatt-charger/logs/growatt-charger.log`
+- When running from source: `<project_root>/logs/growatt-charger.log`
+
 The scripts do not contain any sort of loop, therefore you can run them as (in)frequently as you like, NOTE: There is a limit on the free tier of forecast.solar meaning that if you make more than 12 calls per hour you will be blocked temporarily until your rate limit resets
 
 An example of how to run the container (breakdown below):

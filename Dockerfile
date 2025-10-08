@@ -12,10 +12,17 @@ RUN apt-get update && \
 RUN mkdir /opt/growatt-charger
 
 COPY defaults /opt/growatt-charger/defaults
-COPY bin /opt/growatt-charger/bin
+COPY src /opt/growatt-charger/src
+COPY growatt_charger.py /opt/growatt-charger/
+
+RUN mkdir -p /opt/growatt-charger/conf \
+    /opt/growatt-charger/output \
+    /opt/growatt-charger/logs \
+    && chmod 777 /opt/growatt-charger/logs \
+    /opt/growatt-charger/output
 
 VOLUME /opt/growatt-charger/conf
 VOLUME /opt/growatt-charger/output
 VOLUME /opt/growatt-charger/logs
 
-ENTRYPOINT ["/opt/growatt-charger/bin/growatt-charger.py"]
+ENTRYPOINT ["python", "/opt/growatt-charger/growatt_charger.py"]
