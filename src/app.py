@@ -16,7 +16,7 @@ from .utils import (
     GrowattAuthError,
     GrowattConfigError
 )
-from modules.forecast_api import get_forecast_data_from_config
+from modules.forecast_providers import ForecastManager
 from modules.forecast import ForecastCalculator
 from modules.data_logger import DataLogger
 
@@ -54,10 +54,21 @@ class GrowattCharger:
             # Initialize API client
             self.api = GrowattAPI()
             
-            # Initialize forecast API and calculator
-            self.forecast_api = get_forecast_data_from_config(self.config)
+            # Initialize forecast manager with multi-provider support
+            providers_config = self.config.forecast_providers
+            self.logger.info(
+                f"Initializing forecast providers: {', '.join(providers_config.providers)}"
+            )
+            self.forecast_manager = ForecastManager(
+                self.config,
+                providers=providers_config.providers,
+                primary_provider=providers_config.primary_provider
+            )
+            self.logger.info(f"Primary provider: {providers_config.primary_provider}")
+            
+            # Initialize forecast calculator (uses forecast manager)
             self.forecast_calculator = ForecastCalculator(
-                self.forecast_api, 
+                self.forecast_manager,
                 self.config
             )
             
@@ -92,8 +103,29 @@ class GrowattCharger:
             # Calculate target charge using forecast
             charge_plan = await self._calculate_target_charge(current_charge)
             
+            # Get all provider forecasts if multi-provider mode enabled
+            all_forecasts = {}
+            provider_used = self.forecast_manager.primary_provider_name
+            
+            if self.config.forecast_providers.log_all_providers:
+                self.logger.info("Fetching forecasts from all providers for comparison...")
+                all_forecasts = self.forecast_calculator.get_all_tomorrow_forecasts()
+                
+                # Log provider comparison
+                tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                self.data_logger.log_provider_forecasts(
+                    tomorrow,
+                    all_forecasts,
+                    provider_used
+                )
+                
+                # Log comparison in main log
+                for prov, fc in all_forecasts.items():
+                    if fc is not None:
+                        self.logger.info(f"  {prov}: {fc:.0f}Wh ({fc/1000:.2f}kWh)")
+            
             # Log the prediction for tomorrow
-            self._log_prediction(current_charge, charge_plan)
+            self._log_prediction(current_charge, charge_plan, provider_used, all_forecasts)
             
             # Log the charging plan
             self.logger.info(
@@ -385,13 +417,16 @@ class GrowattCharger:
             self.logger.warning(f"Could not log previous day actual: {e}")
             # Don't raise - this is optional logging
 
-    def _log_prediction(self, current_soc: float, charge_plan: Dict[str, Any]) -> None:
+    def _log_prediction(self, current_soc: float, charge_plan: Dict[str, Any],
+                        provider_used: str = None, all_forecasts: Dict[str, float] = None) -> None:
         """
         Log the prediction for tomorrow.
         
         Args:
             current_soc: Current battery SOC
             charge_plan: Calculated charge plan
+            provider_used: Name of provider used for decision
+            all_forecasts: All provider forecasts (if multi-provider mode)
         """
         try:
             tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -408,7 +443,9 @@ class GrowattCharger:
                 off_peak_start=tariff_config.off_peak_start_time,
                 off_peak_end=tariff_config.off_peak_end_time,
                 battery_capacity_wh=growatt_config.battery_capacity_wh,
-                average_load_w=growatt_config.average_load_w
+                average_load_w=growatt_config.average_load_w,
+                provider_used=provider_used,
+                all_provider_forecasts=all_forecasts
             )
             
             self.logger.info(f"Logged prediction for {tomorrow}")

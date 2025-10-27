@@ -1,18 +1,3 @@
-# forecast.py
-"""""
-from forecast_api import get_forecast_data
-
-def get_forecast_for_date(date):
-    forecast = get_forecast_data(date)
-    return forecast.get("expected_generation_wh", 0)
-
-def compute_scaled_soc(expected_wh):
-    # Example scaling logic — adjust as needed
-    max_capacity_wh = 10000  # e.g. 10kWh battery
-    soc = min(100, int((expected_wh / max_capacity_wh) * 100))
-    return soc
-"""
-
 """Solar forecast calculations and SOC target determination."""
 
 from datetime import datetime, timedelta
@@ -74,7 +59,9 @@ def get_scaled_soc_target(
         target_soc = maximum_charge_pct
     
     # Constrain to configured limits
-    target_soc = max(minimum_charge_pct, min(maximum_charge_pct, target_soc))
+    # Account for practical charging ceiling (~85% with current setup)
+    practical_max = min(maximum_charge_pct, 85)  # Rarely exceeds 85% with 3hr window
+    target_soc = max(minimum_charge_pct, min(practical_max, target_soc))
     
     return int(target_soc)
 
@@ -148,36 +135,48 @@ def calculate_charge_rate(
 class ForecastCalculator:
     """Handles solar forecast calculations and charge planning."""
     
-    def __init__(self, api: ForecastSolarAPI, config):
+    def __init__(self, forecast_manager, config):
         """
         Initialize forecast calculator.
         
         Args:
-            api: ForecastSolarAPI instance
+            forecast_manager: ForecastManager instance (or legacy API for backwards compat)
             config: Configuration manager instance
         """
-        self.api = api
+        self.forecast_manager = forecast_manager
         self.config = config
     
     def get_tomorrow_forecast(self) -> float:
         """
-        Get tomorrow's solar generation forecast.
+        Get tomorrow's solar generation forecast from primary provider.
         
         Returns:
             Forecasted generation in Wh
         """
         tomorrow = datetime.now() + timedelta(days=1)
-        return self.api.get_forecast_for_date(tomorrow)
+        forecast_wh, provider_used = self.forecast_manager.get_forecast_for_date(tomorrow)
+        return forecast_wh
+    
+    def get_all_tomorrow_forecasts(self) -> Dict[str, float]:
+        """
+        Get tomorrow's forecast from all configured providers.
+        
+        Returns:
+            Dictionary mapping provider name to forecast (Wh)
+        """
+        tomorrow = datetime.now() + timedelta(days=1)
+        return self.forecast_manager.get_all_forecasts_for_date(tomorrow)
     
     def get_tomorrow_hourly_forecast(self) -> Dict[datetime, float]:
         """
-        Get tomorrow's hourly solar generation forecast.
+        Get tomorrow's hourly solar generation forecast from primary provider.
         
         Returns:
             Dictionary mapping hour to forecasted watts
         """
         tomorrow = datetime.now() + timedelta(days=1)
-        return self.api.get_hourly_forecast_for_date(tomorrow)
+        hourly, provider_used = self.forecast_manager.get_hourly_forecast_for_date(tomorrow)
+        return hourly
     
     def calculate_optimal_charge_plan(
         self, 

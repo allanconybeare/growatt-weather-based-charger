@@ -22,6 +22,7 @@ class DataLogger:
         self.predictions_file = os.path.join(output_dir, "predictions.csv")
         self.actuals_file = os.path.join(output_dir, "actuals.csv")
         self.summary_file = os.path.join(output_dir, "performance_summary.csv")
+        self.provider_comparison_file = os.path.join(output_dir, "provider_comparison.csv")
     
     def log_prediction(
         self,
@@ -35,14 +36,16 @@ class DataLogger:
         off_peak_end: str,
         battery_capacity_wh: int,
         average_load_w: float,
-        expected_soc_increase: float = None
+        expected_soc_increase: float = None,
+        provider_used: str = None,
+        all_provider_forecasts: dict = None
     ) -> None:
         """
         Log the prediction made at 22:00 for the next day.
         
         Args:
             prediction_date: Date being predicted for (YYYY-MM-DD)
-            forecast_wh: Forecasted generation in Wh
+            forecast_wh: Forecasted generation in Wh (from primary provider)
             solar_coverage_pct: Percentage of daily needs covered by forecast
             current_soc: Current battery SOC when prediction made
             target_soc: Target SOC set for charging
@@ -52,6 +55,8 @@ class DataLogger:
             battery_capacity_wh: Battery capacity in Wh
             average_load_w: Average load in watts
             expected_soc_increase: Expected SOC increase from charging
+            provider_used: Name of provider used for decision
+            all_provider_forecasts: Dict of all provider forecasts for comparison
         """
         file_exists = os.path.isfile(self.predictions_file)
         
@@ -72,12 +77,23 @@ class DataLogger:
                     "Off-Peak Window",
                     "Battery Capacity (Wh)",
                     "Avg Load (W)",
-                    "Daily Consumption (Wh)"
+                    "Daily Consumption (Wh)",
+                    "Provider Used",
+                    "Alternative Forecasts"
                 ])
             
             logged_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             soc_increase = expected_soc_increase if expected_soc_increase else (target_soc - current_soc)
             daily_consumption = average_load_w * 24
+            
+            # Format alternative forecasts as JSON-like string
+            alt_forecasts = ""
+            if all_provider_forecasts and len(all_provider_forecasts) > 1:
+                alt_list = []
+                for prov, fc in all_provider_forecasts.items():
+                    if prov != provider_used and fc is not None:
+                        alt_list.append(f"{prov}:{fc:.0f}")
+                alt_forecasts = "; ".join(alt_list)
             
             writer.writerow([
                 prediction_date,
@@ -92,7 +108,9 @@ class DataLogger:
                 f"{off_peak_start}-{off_peak_end}",
                 battery_capacity_wh,
                 average_load_w,
-                int(daily_consumption)
+                int(daily_consumption),
+                provider_used or "unknown",
+                alt_forecasts
             ])
     
     def log_actual(
@@ -152,6 +170,69 @@ class DataLogger:
                 int(charge_energy_wh) if charge_energy_wh else "",
                 round(charge_energy_wh / 1000, 2) if charge_energy_wh else "",
                 notes
+            ])
+    
+    def log_provider_forecasts(
+        self,
+        date: str,
+        all_forecasts: Dict[str, float],
+        primary_provider: str
+    ) -> None:
+        """
+        Log forecasts from all providers for comparison.
+        
+        Args:
+            date: Date being forecasted for (YYYY-MM-DD)
+            all_forecasts: Dict mapping provider name to forecast (Wh)
+            primary_provider: Name of primary provider used for decision
+        """
+        file_exists = os.path.isfile(self.provider_comparison_file)
+        
+        with open(self.provider_comparison_file, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            
+            if not file_exists:
+                writer.writerow([
+                    "Date",
+                    "Logged At",
+                    "Primary Provider",
+                    "Primary Forecast (kWh)",
+                    "Solcast Forecast (kWh)",
+                    "ForecastSolar Forecast (kWh)",
+                    "Variance (kWh)",
+                    "Variance (%)"
+                ])
+            
+            logged_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Get forecasts for each provider (handle None values)
+            primary_fc = all_forecasts.get(primary_provider)
+            primary_fc_kwh = (primary_fc / 1000) if primary_fc is not None else 0
+            
+            solcast_fc = all_forecasts.get('solcast')
+            solcast_fc_kwh = (solcast_fc / 1000) if solcast_fc is not None else 0
+            
+            forecast_solar_fc = all_forecasts.get('forecast.solar')
+            forecast_solar_fc_kwh = (forecast_solar_fc / 1000) if forecast_solar_fc is not None else 0
+            
+            # Calculate variance between providers (only if both are available)
+            if solcast_fc_kwh > 0 and forecast_solar_fc_kwh > 0:
+                variance_kwh = abs(solcast_fc_kwh - forecast_solar_fc_kwh)
+                avg_fc = (solcast_fc_kwh + forecast_solar_fc_kwh) / 2
+                variance_pct = (variance_kwh / avg_fc * 100) if avg_fc > 0 else 0
+            else:
+                variance_kwh = 0
+                variance_pct = 0
+            
+            writer.writerow([
+                date,
+                logged_at,
+                primary_provider,
+                round(primary_fc_kwh, 2) if primary_fc_kwh > 0 else "N/A",
+                round(solcast_fc_kwh, 2) if solcast_fc_kwh > 0 else "N/A",
+                round(forecast_solar_fc_kwh, 2) if forecast_solar_fc_kwh > 0 else "N/A",
+                round(variance_kwh, 2) if variance_kwh > 0 else "N/A",
+                round(variance_pct, 1) if variance_pct > 0 else "N/A"
             ])
     
     def generate_performance_summary(self) -> None:

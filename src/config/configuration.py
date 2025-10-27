@@ -2,7 +2,7 @@
 
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from configparser import ConfigParser
 from dataclasses import dataclass
 from datetime import datetime
@@ -119,6 +119,27 @@ class ForecastConfig:
                 f"{field_name} must be positive, got {value}"
             )
 
+@dataclass
+class ForecastProvidersConfig:
+    """Multi-provider forecast configuration."""
+    providers: List[str]  # e.g. ['solcast', 'forecast.solar']
+    primary_provider: str  # Which provider to use for charging decisions
+    fallback_enabled: bool = True  # Auto-fallback if primary fails
+    log_all_providers: bool = True  # Log all providers for comparison
+
+
+@dataclass
+class SolcastConfig:
+    """Solcast-specific configuration."""
+    api_key: str
+    resource_id: Optional[str] = None  # Optional - uses lat/lon if not provided
+    
+    def __post_init__(self):
+        """Validate Solcast configuration."""
+        if not self.api_key:
+            raise GrowattConfigError("Solcast API key is required")
+
+
 class ConfigManager:
     """Configuration manager for the application."""
 
@@ -168,6 +189,70 @@ class ConfigManager:
             value = self.config.get(section, key, fallback='')
         return value
 
+    def _parse_providers_list(self, value: str) -> List[str]:
+        """Parse comma-separated list of providers."""
+        if not value:
+            return ['forecast.solar']  # Default
+        return [p.strip() for p in value.split(',')]
+
+    @property
+    def forecast_providers(self) -> ForecastProvidersConfig:
+        """Get forecast providers configuration."""
+        # Get the section - might be 'forecast' or 'forecast.solar'
+        if 'forecast' in self.config:
+            section = self.config['forecast']
+        elif 'forecast.solar' in self.config:
+            section = self.config['forecast.solar']
+        else:
+            # Return defaults
+            return ForecastProvidersConfig(
+                providers=['forecast.solar'],
+                primary_provider='forecast.solar',
+                fallback_enabled=True,
+                log_all_providers=True
+            )
+        
+        providers_str = section.get('providers', 'forecast.solar')
+        providers = self._parse_providers_list(providers_str)
+        
+        primary = section.get('primary_provider', providers[0] if providers else 'forecast.solar')
+        
+        # Handle boolean values properly
+        fallback_str = section.get('fallback_enabled', 'true').lower()
+        fallback = fallback_str in ('true', 'yes', '1', 'on')
+        
+        log_all_str = section.get('log_all_providers', 'true').lower()
+        log_all = log_all_str in ('true', 'yes', '1', 'on')
+        
+        return ForecastProvidersConfig(
+            providers=providers,
+            primary_provider=primary,
+            fallback_enabled=fallback,
+            log_all_providers=log_all
+        )
+
+    @property
+    def solcast(self) -> Optional[SolcastConfig]:
+        """Get Solcast configuration if available."""
+        # Try environment variable first
+        api_key = os.getenv('SOLCAST_API_KEY')
+        
+        # Fall back to config file
+        if not api_key and 'solcast' in self.config:
+            api_key = self.config['solcast'].get('api_key', '')
+        
+        if not api_key:
+            return None  # Solcast not configured
+        
+        resource_id = None
+        if 'solcast' in self.config:
+            resource_id = self.config['solcast'].get('resource_id', '')
+        
+        return SolcastConfig(
+            api_key=api_key,
+            resource_id=resource_id if resource_id else None
+        )
+    
     @property
     def growatt(self) -> GrowattConfig:
         """Get validated Growatt configuration."""
@@ -209,3 +294,4 @@ class ConfigManager:
             damping=section.getfloat('damping'),
             confidence=section.getfloat('confidence')
         )
+    
