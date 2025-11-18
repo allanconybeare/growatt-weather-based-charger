@@ -1,8 +1,7 @@
 """Solar forecast calculations and SOC target determination."""
 
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
-from .forecast_api import ForecastSolarAPI
+from typing import Any, Dict, Optional
 
 
 def get_scaled_soc_target(
@@ -11,15 +10,15 @@ def get_scaled_soc_target(
     minimum_charge_pct: int,
     maximum_charge_pct: int,
     average_load_w: float,
-    confidence: float = 0.8
+    confidence: float = 0.8,
 ) -> int:
     """
     Calculate optimal SOC target based on forecasted solar yield.
-    
+
     The logic is:
     - High forecast: charge less overnight (rely more on solar)
     - Low forecast: charge more overnight (less solar expected)
-    
+
     Args:
         total_forecast_wh: Total forecasted generation for tomorrow in Wh
         battery_capacity_wh: Battery capacity in Wh
@@ -27,20 +26,20 @@ def get_scaled_soc_target(
         maximum_charge_pct: Maximum allowed charge percentage
         average_load_w: Average household load in watts
         confidence: Confidence factor to apply to forecast (0-1)
-        
+
     Returns:
         Target SOC percentage (constrained by min/max settings)
     """
     # Apply confidence factor to forecast
     adjusted_forecast_wh = total_forecast_wh * confidence
-    
+
     # Calculate what percentage of daily consumption the forecast will cover
     # Assuming 24-hour consumption
     daily_consumption_wh = average_load_w * 24
-    
+
     # How much of daily needs will solar cover?
     solar_coverage_pct = (adjusted_forecast_wh / daily_consumption_wh) * 100
-    
+
     # Determine target SOC based on expected solar coverage
     # These thresholds can be tuned based on your data collection
     if solar_coverage_pct >= 150:  # Excellent solar day
@@ -57,12 +56,10 @@ def get_scaled_soc_target(
         target_soc = maximum_charge_pct - 10
     else:  # Very poor solar day
         target_soc = maximum_charge_pct
-    
+
     # Constrain to configured limits
-    # Account for practical charging ceiling (~85% with current setup)
-    practical_max = min(maximum_charge_pct, 85)  # Rarely exceeds 85% with 3hr window
-    target_soc = max(minimum_charge_pct, min(practical_max, target_soc))
-    
+    target_soc = max(minimum_charge_pct, min(maximum_charge_pct, target_soc))
+
     return int(target_soc)
 
 
@@ -70,10 +67,10 @@ def get_scaled_soc_target_simple(total_forecast_wh: float) -> int:
     """
     Simple threshold-based SOC target calculation.
     This is the function you provided - kept for reference/fallback.
-    
+
     Args:
         total_forecast_wh: Total forecasted generation in Wh
-        
+
     Returns:
         Target SOC percentage
     """
@@ -98,98 +95,116 @@ def calculate_charge_rate(
     current_soc: float,
     battery_capacity_wh: float,
     maximum_charge_rate_w: float,
-    off_peak_duration_hours: float
+    off_peak_duration_hours: float,
+    average_load_w: float = 850,
 ) -> int:
     """
     Calculate required charge rate to reach target SOC during off-peak period.
-    
+
+    IMPORTANT: This calculation accounts for household consumption during the off-peak window.
+    The battery must:
+    1. Charge enough to reach the target SOC
+    2. Also power the house during those hours
+
+    Example (Nov 13 scenario):
+        - Target: 85%, Current: 44%, Need 41% = 2,829 Wh to reach target
+        - Consumption: 850W × 2.98h = 2,536 Wh to power house during charging
+        - Total: 5,365 Wh required → requires 60% charge rate (not 31%)
+
     Args:
         target_soc: Target state of charge percentage
         current_soc: Current state of charge percentage
         battery_capacity_wh: Battery capacity in Wh
         maximum_charge_rate_w: Maximum charge rate in watts
         off_peak_duration_hours: Duration of off-peak period in hours
-        
+        average_load_w: Average household consumption in watts (default: 850W)
+
     Returns:
         Charge rate as percentage of maximum (0-100)
     """
-    # Calculate watt-hours needed
+    # Calculate watt-hours needed to reach target SOC
     soc_needed = target_soc - current_soc
     if soc_needed <= 0:
         return 0  # Already at or above target
-    
-    wh_needed = (soc_needed / 100) * battery_capacity_wh
-    
+
+    wh_to_reach_target = (soc_needed / 100) * battery_capacity_wh
+
+    # Calculate watt-hours needed to power the house during off-peak charging
+    # This is the consumption that happens WHILE the battery is charging
+    wh_for_consumption = average_load_w * off_peak_duration_hours
+
+    # Total watt-hours the battery charger must deliver
+    # = energy to reach target SOC + energy to power the house during charging
+    total_wh_needed = wh_to_reach_target + wh_for_consumption
+
     # Calculate required charge rate
-    required_rate_w = wh_needed / off_peak_duration_hours
-    
+    required_rate_w = total_wh_needed / off_peak_duration_hours
+
     # Convert to percentage of maximum
     charge_rate_pct = (required_rate_w / maximum_charge_rate_w) * 100
-    
+
     # Constrain to 0-100%
     charge_rate_pct = max(0, min(100, charge_rate_pct))
-    
+
     return int(charge_rate_pct)
 
 
 class ForecastCalculator:
     """Handles solar forecast calculations and charge planning."""
-    
+
     def __init__(self, forecast_manager, config):
         """
         Initialize forecast calculator.
-        
+
         Args:
             forecast_manager: ForecastManager instance (or legacy API for backwards compat)
             config: Configuration manager instance
         """
         self.forecast_manager = forecast_manager
         self.config = config
-    
+
     def get_tomorrow_forecast(self) -> float:
         """
         Get tomorrow's solar generation forecast from primary provider.
-        
+
         Returns:
             Forecasted generation in Wh
         """
         tomorrow = datetime.now() + timedelta(days=1)
         forecast_wh, provider_used = self.forecast_manager.get_forecast_for_date(tomorrow)
         return forecast_wh
-    
+
     def get_all_tomorrow_forecasts(self) -> Dict[str, float]:
         """
         Get tomorrow's forecast from all configured providers.
-        
+
         Returns:
             Dictionary mapping provider name to forecast (Wh)
         """
         tomorrow = datetime.now() + timedelta(days=1)
         return self.forecast_manager.get_all_forecasts_for_date(tomorrow)
-    
+
     def get_tomorrow_hourly_forecast(self) -> Dict[datetime, float]:
         """
         Get tomorrow's hourly solar generation forecast from primary provider.
-        
+
         Returns:
             Dictionary mapping hour to forecasted watts
         """
         tomorrow = datetime.now() + timedelta(days=1)
         hourly, provider_used = self.forecast_manager.get_hourly_forecast_for_date(tomorrow)
         return hourly
-    
+
     def calculate_optimal_charge_plan(
-        self, 
-        current_soc: float,
-        forecast_wh: Optional[float] = None
+        self, current_soc: float, forecast_wh: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Calculate optimal charging plan based on forecast.
-        
+
         Args:
             current_soc: Current battery charge percentage
             forecast_wh: Optional forecast override (otherwise fetches tomorrow's)
-            
+
         Returns:
             Dictionary containing:
                 - target_soc: Target charge percentage
@@ -200,10 +215,10 @@ class ForecastCalculator:
         # Get forecast if not provided
         if forecast_wh is None:
             forecast_wh = self.get_tomorrow_forecast()
-        
+
         growatt_config = self.config.growatt
         tariff_config = self.config.tariff
-        
+
         # Calculate target SOC
         target_soc = get_scaled_soc_target(
             total_forecast_wh=forecast_wh,
@@ -211,31 +226,32 @@ class ForecastCalculator:
             minimum_charge_pct=growatt_config.minimum_charge_pct,
             maximum_charge_pct=growatt_config.maximum_charge_pct,
             average_load_w=growatt_config.average_load_w,
-            confidence=self.config.forecast.confidence
+            confidence=self.config.forecast.confidence,
         )
-        
+
         # Calculate off-peak duration
-        start = datetime.strptime(tariff_config.off_peak_start_time, '%H:%M')
-        end = datetime.strptime(tariff_config.off_peak_end_time, '%H:%M')
+        start = datetime.strptime(tariff_config.off_peak_start_time, "%H:%M")
+        end = datetime.strptime(tariff_config.off_peak_end_time, "%H:%M")
         off_peak_hours = (end - start).seconds / 3600
-        
+
         # Calculate required charge rate
         charge_rate_pct = calculate_charge_rate(
             target_soc=target_soc,
             current_soc=current_soc,
             battery_capacity_wh=growatt_config.battery_capacity_wh,
             maximum_charge_rate_w=growatt_config.maximum_charge_rate_w,
-            off_peak_duration_hours=off_peak_hours
+            off_peak_duration_hours=off_peak_hours,
+            average_load_w=growatt_config.average_load_w,
         )
-        
+
         # Calculate solar coverage
         daily_consumption_wh = growatt_config.average_load_w * 24
         solar_coverage_pct = (forecast_wh / daily_consumption_wh) * 100
-        
+
         return {
-            'target_soc': target_soc,
-            'charge_rate_pct': charge_rate_pct,
-            'forecast_wh': forecast_wh,
-            'solar_coverage_pct': solar_coverage_pct,
-            'off_peak_hours': off_peak_hours
+            "target_soc": target_soc,
+            "charge_rate_pct": charge_rate_pct,
+            "forecast_wh": forecast_wh,
+            "solar_coverage_pct": solar_coverage_pct,
+            "off_peak_hours": off_peak_hours,
         }

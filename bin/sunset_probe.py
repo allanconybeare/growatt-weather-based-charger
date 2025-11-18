@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
-from modules.growatt_logging import log_run_to_csv
+
+from modules.forecast import compute_scaled_soc, get_forecast_for_date
 from modules.growatt_api import get_current_soc, get_daily_generation, push_charge_schedule
-from modules.forecast import get_forecast_for_date, compute_scaled_soc
+from modules.growatt_logging import log_run_to_csv
 from modules.sunset import get_sunset_time, update_sunset_job
+
 
 def run_sunset_probe():
     now = datetime.now()
@@ -13,11 +15,7 @@ def run_sunset_probe():
     actual_generation_wh = get_daily_generation()
 
     # 2. Log today's performance
-    log_run_to_csv(
-        date=today_str,
-        sunset_soc=sunset_soc,
-        actual_generation_wh=actual_generation_wh
-    )
+    log_run_to_csv(date=today_str, sunset_soc=sunset_soc, actual_generation_wh=actual_generation_wh)
 
     # 3. Get tomorrow’s forecast and compute SOC
     tomorrow = now + timedelta(days=1)

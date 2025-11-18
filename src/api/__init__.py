@@ -2,4 +2,4 @@
 
 from .growatt import GrowattAPI
 
-__all__ = ['GrowattAPI']
+__all__ = ["GrowattAPI"]

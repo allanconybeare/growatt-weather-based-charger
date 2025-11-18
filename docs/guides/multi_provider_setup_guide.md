@@ -61,10 +61,10 @@ fallback_enabled = true
 log_all_providers = true
 
 [solcast]
-# API key from environment variable SOLCAST_API_KEY - 
+# API key from environment variable SOLCAST_API_KEY -
 #  create an account on solcast, in your profile generate the key
 # Optional: Use resource_id for higher accuracy, required if using the free tier
-# Comma-separated list of resource IDs for multiple azimuth's; solcast "supports" split arrays 
+# Comma-separated list of resource IDs for multiple azimuth's; solcast "supports" split arrays
 #  or multiple azimuth's by using multiple locations e.g. -
 #  You have panels facing in multiple directions
 #  https://kb.solcast.com.au/how-do-i-create-a-multiple-azimuth-rooftop-solar-site

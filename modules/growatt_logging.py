@@ -1,14 +1,15 @@
-import logging
-from logging.handlers import RotatingFileHandler
-import os
 import csv
+import logging
+import os
 import time
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
 # Get base directory relative to this file
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+
 
 def setup_logger(name="growatt-charger", max_bytes=1_000_000, backup_count=5):
     # Ensure log and output directories exist
@@ -27,11 +28,14 @@ def setup_logger(name="growatt-charger", max_bytes=1_000_000, backup_count=5):
 
     # Rotating file
     log_path = os.path.join(LOG_DIR, f"{name}.log")
-    fh = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
+    fh = RotatingFileHandler(
+        log_path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+    )
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
     return logger
+
 
 def exit_printing(output_string, logger=None):
     now = datetime.now()
@@ -49,6 +53,7 @@ def exit_printing(output_string, logger=None):
         for line in output_string:
             logger.info(line)
 
+
 def cleanup_old_logs(log_dir=LOG_DIR, max_age_days=7):
     now = time.time()
     cutoff = now - (max_age_days * 86400)
@@ -57,6 +62,7 @@ def cleanup_old_logs(log_dir=LOG_DIR, max_age_days=7):
         fpath = os.path.join(log_dir, fname)
         if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
             os.remove(fpath)
+
 
 def log_run_to_csv(
     date: str,
@@ -70,23 +76,39 @@ def log_run_to_csv(
     charge_rate_pct: float,
     sunset_soc: float = None,
     grid_import_wh: float = None,
-    csv_path=os.path.join(OUTPUT_DIR, "summary.csv")
+    csv_path=os.path.join(OUTPUT_DIR, "summary.csv"),
 ):
     file_exists = os.path.isfile(csv_path)
     with open(csv_path, mode="a", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         if not file_exists:
-            writer.writerow([
-                "Date", "Forecast (Wh)", "Scaled Max SOC (%)", "Target SOC (%)",
-                "Current SOC (%)", "Surplus PV (Wh)", "Grid-Neutral Time",
-                "Required Grid Wh", "Charge Rate (%)",
-                "SOC at Sunset (%)", "Grid Import (Wh)"
-            ])
-        writer.writerow([
-            date, int(forecast_wh), scaled_max_soc, round(target_soc, 1),
-            round(current_soc, 1), int(surplus_wh), grid_neutral_time,
-            round(required_grid_wh, 1), round(charge_rate_pct, 1),
-            round(sunset_soc, 1) if sunset_soc is not None else "",
-            int(grid_import_wh) if grid_import_wh is not None else ""
-        ])
-
+            writer.writerow(
+                [
+                    "Date",
+                    "Forecast (Wh)",
+                    "Scaled Max SOC (%)",
+                    "Target SOC (%)",
+                    "Current SOC (%)",
+                    "Surplus PV (Wh)",
+                    "Grid-Neutral Time",
+                    "Required Grid Wh",
+                    "Charge Rate (%)",
+                    "SOC at Sunset (%)",
+                    "Grid Import (Wh)",
+                ]
+            )
+        writer.writerow(
+            [
+                date,
+                int(forecast_wh),
+                scaled_max_soc,
+                round(target_soc, 1),
+                round(current_soc, 1),
+                int(surplus_wh),
+                grid_neutral_time,
+                round(required_grid_wh, 1),
+                round(charge_rate_pct, 1),
+                round(sunset_soc, 1) if sunset_soc is not None else "",
+                int(grid_import_wh) if grid_import_wh is not None else "",
+            ]
+        )

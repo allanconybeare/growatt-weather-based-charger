@@ -1,29 +1,29 @@
 """Enhanced data logging for forecast accuracy tracking and optimization."""
 
-import os
 import csv
+import os
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 
 class DataLogger:
     """Handles CSV logging of predictions, actuals, and performance metrics."""
-    
+
     def __init__(self, output_dir: str = "output"):
         """
         Initialize the data logger.
-        
+
         Args:
             output_dir: Directory to store CSV files
         """
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        
+
         self.predictions_file = os.path.join(output_dir, "predictions.csv")
         self.actuals_file = os.path.join(output_dir, "actuals.csv")
         self.summary_file = os.path.join(output_dir, "performance_summary.csv")
         self.provider_comparison_file = os.path.join(output_dir, "provider_comparison.csv")
-    
+
     def log_prediction(
         self,
         prediction_date: str,
@@ -38,11 +38,11 @@ class DataLogger:
         average_load_w: float,
         expected_soc_increase: float = None,
         provider_used: str = None,
-        all_provider_forecasts: dict = None
+        all_provider_forecasts: dict = None,
     ) -> None:
         """
         Log the prediction made at 22:00 for the next day.
-        
+
         Args:
             prediction_date: Date being predicted for (YYYY-MM-DD)
             forecast_wh: Forecasted generation in Wh (from primary provider)
@@ -59,33 +59,37 @@ class DataLogger:
             all_provider_forecasts: Dict of all provider forecasts for comparison
         """
         file_exists = os.path.isfile(self.predictions_file)
-        
+
         with open(self.predictions_file, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            
+
             if not file_exists:
-                writer.writerow([
-                    "Prediction Date",
-                    "Logged At",
-                    "Forecast (Wh)",
-                    "Forecast (kWh)",
-                    "Solar Coverage (%)",
-                    "Current SOC (%)",
-                    "Target SOC (%)",
-                    "Expected SOC Increase (%)",
-                    "Charge Rate Set (%)",
-                    "Off-Peak Window",
-                    "Battery Capacity (Wh)",
-                    "Avg Load (W)",
-                    "Daily Consumption (Wh)",
-                    "Provider Used",
-                    "Alternative Forecasts"
-                ])
-            
+                writer.writerow(
+                    [
+                        "Prediction Date",
+                        "Logged At",
+                        "Forecast (Wh)",
+                        "Forecast (kWh)",
+                        "Solar Coverage (%)",
+                        "Current SOC (%)",
+                        "Target SOC (%)",
+                        "Expected SOC Increase (%)",
+                        "Charge Rate Set (%)",
+                        "Off-Peak Window",
+                        "Battery Capacity (Wh)",
+                        "Avg Load (W)",
+                        "Daily Consumption (Wh)",
+                        "Provider Used",
+                        "Alternative Forecasts",
+                    ]
+                )
+
             logged_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            soc_increase = expected_soc_increase if expected_soc_increase else (target_soc - current_soc)
+            soc_increase = (
+                expected_soc_increase if expected_soc_increase else (target_soc - current_soc)
+            )
             daily_consumption = average_load_w * 24
-            
+
             # Format alternative forecasts as JSON-like string
             alt_forecasts = ""
             if all_provider_forecasts and len(all_provider_forecasts) > 1:
@@ -94,25 +98,27 @@ class DataLogger:
                     if prov != provider_used and fc is not None:
                         alt_list.append(f"{prov}:{fc:.0f}")
                 alt_forecasts = "; ".join(alt_list)
-            
-            writer.writerow([
-                prediction_date,
-                logged_at,
-                int(forecast_wh),
-                round(forecast_wh / 1000, 2),
-                round(solar_coverage_pct, 1),
-                round(current_soc, 1),
-                target_soc,
-                round(soc_increase, 1),
-                charge_rate_pct,
-                f"{off_peak_start}-{off_peak_end}",
-                battery_capacity_wh,
-                average_load_w,
-                int(daily_consumption),
-                provider_used or "unknown",
-                alt_forecasts
-            ])
-    
+
+            writer.writerow(
+                [
+                    prediction_date,
+                    logged_at,
+                    int(forecast_wh),
+                    round(forecast_wh / 1000, 2),
+                    round(solar_coverage_pct, 1),
+                    round(current_soc, 1),
+                    target_soc,
+                    round(soc_increase, 1),
+                    charge_rate_pct,
+                    f"{off_peak_start}-{off_peak_end}",
+                    battery_capacity_wh,
+                    average_load_w,
+                    int(daily_consumption),
+                    provider_used or "unknown",
+                    alt_forecasts,
+                ]
+            )
+
     def log_actual(
         self,
         actual_date: str,
@@ -121,11 +127,11 @@ class DataLogger:
         soc_at_morning: Optional[float] = None,
         charge_energy_wh: Optional[float] = None,
         actual_soc_increase: Optional[float] = None,
-        notes: str = ""
+        notes: str = "",
     ) -> None:
         """
         Log the actual results for a given day.
-        
+
         Args:
             actual_date: Date of actual results (YYYY-MM-DD)
             actual_generation_wh: Actual generation in Wh
@@ -136,85 +142,90 @@ class DataLogger:
             notes: Any additional notes
         """
         file_exists = os.path.isfile(self.actuals_file)
-        
+
         with open(self.actuals_file, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            
+
             if not file_exists:
-                writer.writerow([
-                    "Date",
-                    "Logged At",
-                    "Actual Generation (Wh)",
-                    "Actual Generation (kWh)",
-                    "SOC at Evening (%)",
-                    "SOC at Morning (%)",
-                    "Actual SOC Increase (%)",
-                    "Charge Energy (Wh)",
-                    "Charge Energy (kWh)",
-                    "Notes"
-                ])
-            
+                writer.writerow(
+                    [
+                        "Date",
+                        "Logged At",
+                        "Actual Generation (Wh)",
+                        "Actual Generation (kWh)",
+                        "SOC at Evening (%)",
+                        "SOC at Morning (%)",
+                        "Actual SOC Increase (%)",
+                        "Charge Energy (Wh)",
+                        "Charge Energy (kWh)",
+                        "Notes",
+                    ]
+                )
+
             logged_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             soc_change = actual_soc_increase
             if soc_change is None and soc_at_sunset is not None and soc_at_morning is not None:
                 soc_change = round(soc_at_sunset - soc_at_morning, 1)
-            
-            writer.writerow([
-                actual_date,
-                logged_at,
-                int(actual_generation_wh),
-                round(actual_generation_wh / 1000, 2),
-                round(soc_at_sunset, 1) if soc_at_sunset else "",
-                round(soc_at_morning, 1) if soc_at_morning else "",
-                round(soc_change, 1) if soc_change else "",
-                int(charge_energy_wh) if charge_energy_wh else "",
-                round(charge_energy_wh / 1000, 2) if charge_energy_wh else "",
-                notes
-            ])
-    
+
+            writer.writerow(
+                [
+                    actual_date,
+                    logged_at,
+                    int(actual_generation_wh),
+                    round(actual_generation_wh / 1000, 2),
+                    round(soc_at_sunset, 1) if soc_at_sunset else "",
+                    round(soc_at_morning, 1) if soc_at_morning else "",
+                    round(soc_change, 1) if soc_change else "",
+                    int(charge_energy_wh) if charge_energy_wh else "",
+                    round(charge_energy_wh / 1000, 2) if charge_energy_wh else "",
+                    notes,
+                ]
+            )
+
     def log_provider_forecasts(
-        self,
-        date: str,
-        all_forecasts: Dict[str, float],
-        primary_provider: str
+        self, date: str, all_forecasts: Dict[str, float], primary_provider: str
     ) -> None:
         """
         Log forecasts from all providers for comparison.
-        
+
         Args:
             date: Date being forecasted for (YYYY-MM-DD)
             all_forecasts: Dict mapping provider name to forecast (Wh)
             primary_provider: Name of primary provider used for decision
         """
         file_exists = os.path.isfile(self.provider_comparison_file)
-        
+
         with open(self.provider_comparison_file, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            
+
             if not file_exists:
-                writer.writerow([
-                    "Date",
-                    "Logged At",
-                    "Primary Provider",
-                    "Primary Forecast (kWh)",
-                    "Solcast Forecast (kWh)",
-                    "ForecastSolar Forecast (kWh)",
-                    "Variance (kWh)",
-                    "Variance (%)"
-                ])
-            
+                writer.writerow(
+                    [
+                        "Date",
+                        "Logged At",
+                        "Primary Provider",
+                        "Primary Forecast (kWh)",
+                        "Solcast Forecast (kWh)",
+                        "ForecastSolar Forecast (kWh)",
+                        "Variance (kWh)",
+                        "Variance (%)",
+                    ]
+                )
+
             logged_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
+
             # Get forecasts for each provider (handle None values)
             primary_fc = all_forecasts.get(primary_provider)
             primary_fc_kwh = (primary_fc / 1000) if primary_fc is not None else 0
-            
-            solcast_fc = all_forecasts.get('solcast')
+
+            solcast_fc = all_forecasts.get("solcast")
             solcast_fc_kwh = (solcast_fc / 1000) if solcast_fc is not None else 0
-            
-            forecast_solar_fc = all_forecasts.get('forecast.solar')
-            forecast_solar_fc_kwh = (forecast_solar_fc / 1000) if forecast_solar_fc is not None else 0
-            
+
+            forecast_solar_fc = all_forecasts.get("forecast.solar")
+            forecast_solar_fc_kwh = (
+                (forecast_solar_fc / 1000) if forecast_solar_fc is not None else 0
+            )
+
             # Calculate variance between providers (only if both are available)
             if solcast_fc_kwh > 0 and forecast_solar_fc_kwh > 0:
                 variance_kwh = abs(solcast_fc_kwh - forecast_solar_fc_kwh)
@@ -223,18 +234,20 @@ class DataLogger:
             else:
                 variance_kwh = 0
                 variance_pct = 0
-            
-            writer.writerow([
-                date,
-                logged_at,
-                primary_provider,
-                round(primary_fc_kwh, 2) if primary_fc_kwh > 0 else "N/A",
-                round(solcast_fc_kwh, 2) if solcast_fc_kwh > 0 else "N/A",
-                round(forecast_solar_fc_kwh, 2) if forecast_solar_fc_kwh > 0 else "N/A",
-                round(variance_kwh, 2) if variance_kwh > 0 else "N/A",
-                round(variance_pct, 1) if variance_pct > 0 else "N/A"
-            ])
-    
+
+            writer.writerow(
+                [
+                    date,
+                    logged_at,
+                    primary_provider,
+                    round(primary_fc_kwh, 2) if primary_fc_kwh > 0 else "N/A",
+                    round(solcast_fc_kwh, 2) if solcast_fc_kwh > 0 else "N/A",
+                    round(forecast_solar_fc_kwh, 2) if forecast_solar_fc_kwh > 0 else "N/A",
+                    round(variance_kwh, 2) if variance_kwh > 0 else "N/A",
+                    round(variance_pct, 1) if variance_pct > 0 else "N/A",
+                ]
+            )
+
     def generate_performance_summary(self) -> None:
         """
         Generate a performance summary by matching predictions with actuals.
@@ -248,7 +261,7 @@ class DataLogger:
                 for row in reader:
                     date = row["Prediction Date"]
                     predictions[date] = row
-        
+
         # Read actuals
         actuals = {}
         if os.path.isfile(self.actuals_file):
@@ -257,46 +270,52 @@ class DataLogger:
                 for row in reader:
                     date = row["Date"]
                     actuals[date] = row
-        
+
         # Combine and calculate metrics
         with open(self.summary_file, mode="w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            
-            writer.writerow([
-                "Date",
-                "Forecast (kWh)",
-                "Actual (kWh)",
-                "Accuracy (%)",
-                "Error (kWh)",
-                "Solar Coverage Predicted (%)",
-                "Target SOC (%)",
-                "Expected SOC Increase (%)",
-                "Actual SOC Increase (%)",
-                "Charge Rate Set (%)",
-                "Charge Energy (kWh)",
-                "Charge Efficiency (%)",
-                "SOC at Evening (%)",
-                "Performance"
-            ])
-            
+
+            writer.writerow(
+                [
+                    "Date",
+                    "Forecast (kWh)",
+                    "Actual (kWh)",
+                    "Accuracy (%)",
+                    "Error (kWh)",
+                    "Solar Coverage Predicted (%)",
+                    "Target SOC (%)",
+                    "Expected SOC Increase (%)",
+                    "Actual SOC Increase (%)",
+                    "Charge Rate Set (%)",
+                    "Charge Energy (kWh)",
+                    "Charge Efficiency (%)",
+                    "SOC at Evening (%)",
+                    "Performance",
+                ]
+            )
+
             for date in sorted(predictions.keys()):
                 pred = predictions[date]
                 actual = actuals.get(date)
-                
+
                 if actual:
                     forecast_kwh = float(pred["Forecast (kWh)"])
                     actual_kwh = float(actual["Actual Generation (kWh)"])
-                    
+
                     accuracy = (actual_kwh / forecast_kwh * 100) if forecast_kwh > 0 else 0
                     error = actual_kwh - forecast_kwh
-                    
+
                     # Calculate charge efficiency
                     expected_soc_increase = float(pred.get("Expected SOC Increase (%)", 0))
-                    actual_soc_increase = float(actual.get("Actual SOC Increase (%)", 0)) if actual.get("Actual SOC Increase (%)") else None
+                    actual_soc_increase = (
+                        float(actual.get("Actual SOC Increase (%)", 0))
+                        if actual.get("Actual SOC Increase (%)")
+                        else None
+                    )
                     charge_efficiency = None
                     if expected_soc_increase > 0 and actual_soc_increase:
-                        charge_efficiency = (actual_soc_increase / expected_soc_increase * 100)
-                    
+                        charge_efficiency = actual_soc_increase / expected_soc_increase * 100
+
                     # Determine performance rating
                     if accuracy >= 95:
                         performance = "Excellent"
@@ -306,63 +325,75 @@ class DataLogger:
                         performance = "Fair"
                     else:
                         performance = "Poor"
-                    
+
                     # Handle both old and new column names
-                    charge_rate_key = "Charge Rate Set (%)" if "Charge Rate Set (%)" in pred else "Charge Rate (%)"
-                    
-                    writer.writerow([
-                        date,
-                        pred["Forecast (kWh)"],
-                        actual["Actual Generation (kWh)"],
-                        round(accuracy, 1),
-                        round(error, 2),
-                        pred["Solar Coverage (%)"],
-                        pred["Target SOC (%)"],
-                        pred.get("Expected SOC Increase (%)", ""),
-                        actual.get("Actual SOC Increase (%)", ""),
-                        pred[charge_rate_key],
-                        actual.get("Charge Energy (kWh)", ""),
-                        round(charge_efficiency, 1) if charge_efficiency else "",
-                        actual.get("SOC at Evening (%)", ""),
-                        performance
-                    ])
+                    charge_rate_key = (
+                        "Charge Rate Set (%)"
+                        if "Charge Rate Set (%)" in pred
+                        else "Charge Rate (%)"
+                    )
+
+                    writer.writerow(
+                        [
+                            date,
+                            pred["Forecast (kWh)"],
+                            actual["Actual Generation (kWh)"],
+                            round(accuracy, 1),
+                            round(error, 2),
+                            pred["Solar Coverage (%)"],
+                            pred["Target SOC (%)"],
+                            pred.get("Expected SOC Increase (%)", ""),
+                            actual.get("Actual SOC Increase (%)", ""),
+                            pred[charge_rate_key],
+                            actual.get("Charge Energy (kWh)", ""),
+                            round(charge_efficiency, 1) if charge_efficiency else "",
+                            actual.get("SOC at Evening (%)", ""),
+                            performance,
+                        ]
+                    )
                 else:
                     # Prediction exists but no actual data yet
-                    charge_rate_key = "Charge Rate Set (%)" if "Charge Rate Set (%)" in pred else "Charge Rate (%)"
-                    
-                    writer.writerow([
-                        date,
-                        pred["Forecast (kWh)"],
-                        "N/A",
-                        "N/A",
-                        "N/A",
-                        pred["Solar Coverage (%)"],
-                        pred["Target SOC (%)"],
-                        pred.get("Expected SOC Increase (%)", ""),
-                        "N/A",
-                        pred[charge_rate_key],
-                        "N/A",
-                        "N/A",
-                        "N/A",
-                        "Pending"
-                    ])
-    
+                    charge_rate_key = (
+                        "Charge Rate Set (%)"
+                        if "Charge Rate Set (%)" in pred
+                        else "Charge Rate (%)"
+                    )
+
+                    writer.writerow(
+                        [
+                            date,
+                            pred["Forecast (kWh)"],
+                            "N/A",
+                            "N/A",
+                            "N/A",
+                            pred["Solar Coverage (%)"],
+                            pred["Target SOC (%)"],
+                            pred.get("Expected SOC Increase (%)", ""),
+                            "N/A",
+                            pred[charge_rate_key],
+                            "N/A",
+                            "N/A",
+                            "N/A",
+                            "Pending",
+                        ]
+                    )
+
     def get_recent_accuracy(self, days: int = 7) -> Optional[float]:
         """
         Calculate average forecast accuracy for recent days.
-        
+
         Args:
             days: Number of recent days to analyze
-            
+
         Returns:
             Average accuracy percentage, or None if insufficient data
         """
         if not os.path.isfile(self.summary_file):
             return None
-        
+
         accuracies = []
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
+
         with open(self.summary_file, mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
@@ -372,27 +403,27 @@ class DataLogger:
                         accuracies.append(accuracy)
                     except (ValueError, KeyError):
                         continue
-        
+
         if accuracies:
             return sum(accuracies) / len(accuracies)
         return None
-    
+
     def print_recent_summary(self, days: int = 7) -> None:
         """
         Print a summary of recent performance.
-        
+
         Args:
             days: Number of days to include in summary
         """
         avg_accuracy = self.get_recent_accuracy(days)
-        
+
         print(f"\n{'='*60}")
         print(f"Performance Summary (Last {days} Days)")
         print(f"{'='*60}")
-        
+
         if avg_accuracy:
             print(f"Average Forecast Accuracy: {avg_accuracy:.1f}%")
-            
+
             if avg_accuracy >= 90:
                 print("Status: Excellent - Forecasts are highly accurate")
             elif avg_accuracy >= 80:
@@ -403,5 +434,5 @@ class DataLogger:
                 print("Status: Poor - Review configuration and thresholds")
         else:
             print("Insufficient data - need at least one complete day")
-        
+
         print(f"{'='*60}\n")

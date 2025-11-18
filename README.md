@@ -1,19 +1,16 @@
 # Growatt Inverter Solar Forecast Configuration Assistant
-A tool for configuring overnight charging (i.e. during off-peak periods) for Growatt inverters that have storage capacity (batteries) based on the predicted solar generation for the day.
 
-The tool performs the following actions:
-* Uses [forecast.solar](https://forecast.solar/) to predict your solar generation for the next day
-* Uses your average consumption (you provide this as a configuration parameter) to predict at what point you will be grid-neutral i.e. running purely on solar power
-* Calculates excess generation that will be fed into the batteries
-* Uses these calculations for two things:
-    * The required amount of charge to place into the batteries to make it to the grid-neutral time of day
-    * The required amount of charge to place into the batteries to make up the difference between excess generation and having the batteries at 100% by the end of the day
-* Configures the inverter to fill the batteries to the desired amount at the slowest possible rate given the window specified.
-* Outputs a simple text file that can be used to take a quick glance at what has been configured for the upcoming day
+A tool for configuring overnight charging for Growatt inverters with batteries, based on solar generation forecasts. Automatically charges your battery during off-peak periods to minimize grid import during expensive peak hours.
 
-Interfacing with the Growatt Inverter is done using the PyPi library: 
-* [PyPi growattServer](https://pypi.org/project/growattServer/)
-* [github](https://github.com/indykoning/PyPi_GrowattServer)
+**⚡ Quick Start**: [Read the documentation](docs/README.md) – Complete setup guides and reference material
+
+## What It Does
+
+- 🌤️ **Predicts solar generation** using [forecast.solar](https://forecast.solar/) or [Solcast](https://www.solcast.com.au/)
+- 🔋 **Calculates optimal charge settings** to maximize off-peak charging
+- ⏰ **Schedules battery boost** before afternoon peak rates (if needed)
+- 📊 **Logs performance** to track SOC, generation, and charging decisions
+- 🎯 **Works with Growatt inverters** via [PyPi growattServer](https://github.com/indykoning/PyPi_GrowattServer)
 
 ## Usage
 This software can be run either as a Docker container or directly from the source code. Log files are written to:
@@ -42,26 +39,70 @@ Arguments explained:
 
 Note - it is not mandatory to map through the `logs` and `output` directory if you don't need them.
 
-## Configuration
-On the first run of the application a configuration file will be output to the `conf` directory that you can populate, it contains a (hopefully) well documented example of what values are required. More information (including how each value is used) is outlined below.
+## 📖 Documentation
 
-| Config Parameter | Description |
-|------------------|-------------|
-| battery_capacity_wh | The capacity of the batteries in Watt-hours e.g. 9.9kwh = 9900wh. Used to determine what percentage to be filled |
-| maximum_charge_rate_w | The maximum rate that the batteries can be charged at in Watts e.g. 3kw = 3000w. Used to calculate how much excess solar can be diverted to the batteries. Also used to calculate the off-peak charging rate. |
-| statement_of_charge_pct | The statement-of-charge (percentage) that the batteries are configured to have e.g. the minimum amount they will ever go down to (this is for battery preservation) for most systems this is either 10 or 15 |
-| minimum_charge_pct | The minimum charge percentage you would ever like the batteries to be filled to during the off-peak window e.g. even if the solar forecast predicts you need X% always fill it to this value as a minimum |
-| maximum_charge_pct | The maximum charge % that you would like to ever go up to when charging e.g. never charge the batteries to greater than 100% |
-| average_load_w | The average load consumption of your house in Watts e.g. 850w (used to calculate % charge required to get to the point where you are running purely on solar power) |
-| username | Growatt username as used in the shinephone app. OPTIONAL - Can also be provided by an environment variable to avoid credentials coded into this file. Environment variable: `GROWATT_USERNAME` e.g. add the following to the docker command line: `-e GROWATT_USERNAME=my_username` |
-| password | Growatt password as used in the shinephone app. OPTIONAL - Can also be provided by an environment variable to avoid credentials coded into this file. Environment variable: `GROWATT_PASSWORD` e.g. add the following to the docker command line: `-e GROWATT_PASSWORD=my_password` |
-| plant_id | The Growatt Plant ID to be configured - must have a device_sn provided also. OPTIONAL - If not specified the first Plant & SN combination found will be used |
-| device_sn | The Growatt Device SN (for the plant ID) to be configured - must be provided as well as plant_id. OPTIONAL - If not specified the first Plant & SN combo will be used |
-| off_peak_start_time | Off peak start time in 24hour clock format, used to configure when A/C charging will start |
-| off_peak_end_time | Off peak end time in 24 hour clock format, used to configure when A/C charging will end |
-| location | Your location e.g. your home address |
-| declination | The angle of your solar panels in degrees 0=Horizontal, 90=Vertical |
-| azimuth | The orientation of your panels (360 degrees: -180=North, -90=East, 0=South, 90=West) |
-| kw_power | The nominal power of your solar panels in kw e.g. 6.1kw |
-| damping | Damping factor - Adjusts the results in the morning and evening |
-| confidence | Confidence in the returned results 0-1 e.g. 0.8 = 80% confidence in the results returned (sometimes the values from forecast.solar aren't fantastically reliable - this allows you to tweak the results based on your confidence in them) |
+See **[docs/README.md](docs/README.md)** for comprehensive guides and reference material:
+
+- **[Setup Guides](docs/guides/)** – Initial setup, configuration, deployment
+- **[Technical Reference](docs/reference/)** – Architecture, charging logic, calculations
+- **[Archive](docs/archive/)** – Historical notes and session logs
+
+### Common Starting Points
+
+| I want to... | Read |
+|---|---|
+| Configure peak window settings | [Peak Window Config Guide](docs/guides/PEAK_WINDOW_CONFIG_GUIDE.md) |
+| Add a forecast provider | [Multi-Provider Setup](docs/guides/multi_provider_setup_guide.md) |
+| Understand battery charging | [Charge Rate Analysis](docs/reference/BATTERY_HEALTH_AND_CHARGE_RATE_ANALYSIS.md) |
+| Deploy to production | [Deployment Guide](docs/guides/DEPLOYMENT_READY.md) |
+
+## Getting Started
+
+### Option 1: Docker (Recommended)
+
+```bash
+docker run --rm \
+  -e TZ=Europe/London \
+  -v ${PWD}/conf:/opt/growatt-charger/conf \
+  -v ${PWD}/logs:/opt/growatt-charger/logs \
+  muppet3000/growatt-charger:latest
+```
+
+### Option 2: From Source
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # or .venv\Scripts\Activate.ps1 on Windows
+pip install -r requirements.txt
+python -m src.app conf/growatt-charger.ini
+```
+
+### Configure Credentials
+
+Use environment variables (recommended):
+```bash
+export GROWATT_USERNAME=your_username
+export GROWATT_PASSWORD=your_password
+export SOLCAST_API_KEY=your_key  # if using Solcast
+```
+
+Or edit `conf/growatt-charger.ini` (less secure)
+
+## Configuration Highlights
+
+Key settings in `conf/growatt-charger.ini`:
+
+| Setting | Description |
+|---------|-------------|
+| `battery_capacity_wh` | Battery size in Wh (e.g., 9900 for 9.9kWh) |
+| `average_load_w` | House consumption in Watts (e.g., 850W) |
+| `off_peak_start_time` | When cheap rates begin (e.g., 02:00) |
+| `off_peak_end_time` | When cheap rates end (e.g., 05:00) |
+| `peak_start_time` | When expensive rates begin (e.g., 16:00) |
+| `peak_end_time` | When expensive rates end (e.g., 19:00) |
+| `location` | Your address or coordinates |
+| `kw_power` | Solar panel capacity (e.g., 6.1kW) |
+
+See [docs/guides/PEAK_WINDOW_CONFIG_GUIDE.md](docs/guides/PEAK_WINDOW_CONFIG_GUIDE.md) for details.
+
+## How It Works

@@ -6,10 +6,13 @@ Standalone probe for SPA3000TL BL inverter via GrowattServer legacy API.
 Logs in, discovers plant_id and device_sn, then calls a suite of test functions.
 """
 
-import os
 import logging
+import os
+import random
+import string
+
 import growattServer
-import random, string
+
 
 def setup_logger():
     logger = logging.getLogger("spa-probe")
@@ -19,6 +22,7 @@ def setup_logger():
     logger.addHandler(handler)
     return logger
 
+
 def test_look_for_spa_system_status(api, device_sn, plant_id, logger):
     """
     Exercise various endpoints for SPA ac-coupled battery in isolation.
@@ -26,29 +30,31 @@ def test_look_for_spa_system_status(api, device_sn, plant_id, logger):
     try:
         logger.info(f"Probing SPA/AC system status for SN={device_sn}, Plant ID={plant_id}")
 
-        ## Hypothetical SPA system status <- Not supported in current GrowattServer API
-        #if hasattr(api, "spa_system_status"):
+        # Hypothetical SPA system status <- Not supported in current GrowattServer API
+        # if hasattr(api, "spa_system_status"):
         #    resp = api.spa_system_status(device_sn)
         #    logger.info(f"spa_system_status: {resp}")
-        #else:
+        # else:
         #    logger.warning("api.spa_system_status() not implemented in wrapper")
 
-        ## Hypothetical AC system status <- Not supported in current GrowattServer API
-        #if hasattr(api, "ac_system_status"):
+        # Hypothetical AC system status <- Not supported in current GrowattServer API
+        # if hasattr(api, "ac_system_status"):
         #    resp = api.ac_system_status(device_sn)
         #    logger.info(f"ac_system_status: {resp}")
-        #else:
+        # else:
         #    logger.warning("api.ac_system_status() not implemented in wrapper")
 
         try:
-            # storage_energy_overview sometimes returns useful summary data, including SoC and daily stats <- returns "None" for my SPA3000TL
-            resp = api.storage_energy_overview(plant_id, device_sn) 
+            # storage_energy_overview sometimes returns useful summary data, including SoC and
+            # daily stats <- returns "None" for my SPA3000TL
+            resp = api.storage_energy_overview(plant_id, device_sn)
             logger.info(f"storage_energy_overview: {resp}")
         except Exception as e:
             logger.warning(f"storage_energy_overview failed: {e}")
 
     except Exception as e:
         logger.error(f"SPA/AC system status test failed: {e}")
+
 
 def main():
     logger = setup_logger()
@@ -61,9 +67,8 @@ def main():
         return
 
     # random UA just like your main script
-    rand_id = ''.join(
-       random.choices(string.ascii_uppercase + string.digits,
-                      k=random.randint(10,50))
+    rand_id = "".join(
+        random.choices(string.ascii_uppercase + string.digits, k=random.randint(10, 50))
     )
     api = growattServer.GrowattApi(agent_identifier=rand_id)
     api.server_url = "https://server.growatt.com/"
@@ -100,6 +105,7 @@ def main():
 
     # Run the probe tests
     test_look_for_spa_system_status(api, device_sn, plant_id, logger)
+
 
 if __name__ == "__main__":
     main()

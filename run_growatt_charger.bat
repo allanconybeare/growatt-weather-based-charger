@@ -26,7 +26,15 @@ echo ======================================== >> "%MYLOGFILE%"
 :: Config path
 set "GROWATT_CONFIG=%SCRIPT_DIR%conf\growatt-charger.ini"
 
-:: Log environment details
+:: Set Solcast API key from environment variable or secure storage
+:: The key should be stored as a Windows environment variable: SOLCAST_API_KEY
+:: You can set it with: setx SOLCAST_API_KEY "your_key_here" (requires restart to take effect in scheduled tasks)
+:: Or in this batch file for this execution only
+if not defined SOLCAST_API_KEY (
+    echo WARNING: SOLCAST_API_KEY environment variable not set >> "%MYLOGFILE%"
+    echo Solcast API will fail unless api_key is in config file >> "%MYLOGFILE%"
+)
+set "SOLCAST_API_KEY=%SOLCAST_API_KEY%"
 echo Working Directory: %CD% >> "%MYLOGFILE%"
 echo Script Directory: %SCRIPT_DIR% >> "%MYLOGFILE%"
 echo Config Path: %GROWATT_CONFIG% >> "%MYLOGFILE%"
