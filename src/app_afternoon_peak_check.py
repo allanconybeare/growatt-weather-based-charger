@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from modules.api_usage_tracker import get_global_tracker
 from modules.data_logger import DataLogger
+from modules.forecast_cache import ForecastCache
 from modules.forecast_providers import ForecastManager
 from modules.peak_window_boost import (
     calculate_peak_window_boost_target,
@@ -41,6 +42,7 @@ class AfternoonPeakChecker:
             log_dir=log_dir,
             log_file="afternoon-peak-check.log",
             additional_fields={"app": "afternoon-peak-check"},
+            config_path=config_path,
         )
 
         try:
@@ -49,6 +51,13 @@ class AfternoonPeakChecker:
 
             # Initialize API
             self.api = GrowattAPI()
+
+            cache_dir = os.path.join(project_root, self.config.cache.cache_dir)
+            self.forecast_cache = ForecastCache(
+                cache_dir=cache_dir,
+                default_ttl_hours=4.0,
+                enabled=self.config.cache.enabled,  # Add to your config
+            )
 
             # Initialize forecast manager
             providers_config = self.config.forecast_providers
@@ -59,6 +68,7 @@ class AfternoonPeakChecker:
                 self.config,
                 providers=providers_config.providers,
                 primary_provider=providers_config.primary_provider,
+                cache=self.forecast_cache,
             )
 
             # Initialize data logger
@@ -85,20 +95,49 @@ class AfternoonPeakChecker:
             # Get current SOC at 14:00
             current_soc = await self._get_current_soc()
 
+            # START edit for getting the peak window forecast
+            # Get forecast for peak window period (14:00 to 19:00)
+            peak_window_forecast_wh, forecast_source = await self._get_peak_window_forecast()
+            # Get peak window configuration
+            peak_config = self.config.peak_window
+            peak_window_hours = peak_config.get_peak_window_duration_hours()
+
             # Get remaining forecast with fallback chain
-            remaining_forecast_wh, forecast_source = await self._get_remaining_forecast()
+            # remaining_forecast_wh, forecast_source = await self._get_remaining_forecast()
 
             # Decide if boost is needed
             should_boost, reason, details = should_boost_battery_for_peak_window(
-                remaining_forecast_wh=remaining_forecast_wh,
+                # remaining_forecast_wh=remaining_forecast_wh,
+                remaining_forecast_wh=peak_window_forecast_wh,
                 current_soc=current_soc,
                 battery_capacity_wh=self.config.growatt.battery_capacity_wh,
                 average_load_w=self.config.growatt.average_load_w,
+                peak_window_hours=peak_window_hours,
+                forecast_reliability=1.0,  # Use full forecast since it's already windowed
+                forecast_uncertainty_buffer_pct=peak_config.forecast_uncertainty_buffer_pct,
+                minimum_soc_pct=self.config.growatt.statement_of_charge_pct,
             )
+
+            # If revering uncomment below calls and lines with "remainng_forecast_wh", and
+            # ditch the above up to START edit
+            # Get remaining forecast with fallback chain
+            # remaining_forecast_wh, forecast_source = await self._get_remaining_forecast()
+
+            # Decide if boost is needed
+            # should_boost, reason, details = should_boost_battery_for_peak_window(
+            #     remaining_forecast_wh=remaining_forecast_wh,
+            #     current_soc=current_soc,
+            #     battery_capacity_wh=self.config.growatt.battery_capacity_wh,
+            #     average_load_w=self.config.growatt.average_load_w,
+            #     minimum_soc_pct=self.config.growatt.statement_of_charge_pct,
+            # )
+            # Note: if revering need to uncomment lines with "remainng_forecast_wh"
+            # END edit for getting the peak window forecast
 
             self.logger.info(
                 f"14:00 Peak-Window Check: "
-                f"Forecast {remaining_forecast_wh/1000:.1f}kWh ({forecast_source}), "
+                # f"Forecast {remaining_forecast_wh/1000:.1f}kWh ({forecast_source}), "
+                f"Forecast {peak_window_forecast_wh/1000:.1f}kWh ({forecast_source}), "
                 f"SOC {current_soc:.0f}%, "
                 f"Decision: {'BOOST' if should_boost else 'NO BOOST'}"
             )
@@ -107,7 +146,8 @@ class AfternoonPeakChecker:
             # If boost needed, update settings
             if should_boost:
                 target_soc, target_reason = calculate_peak_window_boost_target(
-                    remaining_forecast_wh=remaining_forecast_wh,
+                    # remaining_forecast_wh=remaining_forecast_wh,
+                    remaining_forecast_wh=peak_window_forecast_wh,
                     current_soc=current_soc,
                     battery_capacity_wh=self.config.growatt.battery_capacity_wh,
                     average_load_w=self.config.growatt.average_load_w,
@@ -122,7 +162,8 @@ class AfternoonPeakChecker:
             # Log decision for analysis
             self._log_peak_decision(
                 current_soc=current_soc,
-                remaining_forecast_wh=remaining_forecast_wh,
+                # remaining_forecast_wh=remaining_forecast_wh,
+                remaining_forecast_wh=peak_window_forecast_wh,
                 forecast_source=forecast_source,
                 should_boost=should_boost,
                 reason=reason,
@@ -200,6 +241,7 @@ class AfternoonPeakChecker:
                 self.logger.info(
                     f"Remaining forecast: {forecast_wh/1000:.1f}kWh from {provider_used}"
                 )
+                self.logger.info(f"DEBUG: Remaining forecast: {forecast_wh:.1f}kW")
                 return forecast_wh, provider_used
 
             except Exception as e:
@@ -225,6 +267,75 @@ class AfternoonPeakChecker:
         # Conservative estimate (safe default if all else fails)
         self.logger.warning("All forecast sources failed. Using conservative estimate (3kWh)")
         return 3000, "conservative_estimate"
+
+    async def _get_peak_window_forecast(self) -> Tuple[float, str]:
+        """
+        Get solar forecast specifically for the peak window period.
+
+        Uses hourly forecast data to calculate generation from check_time to peak_end_time.
+        More accurate than applying a reliability factor to full day forecast.
+
+        Returns:
+            Tuple of (peak_window_forecast_wh, source_description)
+        """
+        try:
+            now = datetime.now()
+            current_hour = now.replace(minute=0, second=0, microsecond=0)
+
+            # Get peak window times from config
+            peak_config = self.config.peak_window
+            peak_end_time = datetime.strptime(peak_config.peak_end_time, "%H:%M").time()
+            peak_end = now.replace(
+                hour=peak_end_time.hour, minute=peak_end_time.minute, second=0, microsecond=0
+            )
+
+            # Validate timing - must be before peak window
+            peak_start_time = datetime.strptime(peak_config.peak_start_time, "%H:%M").time()
+
+            if now.time() >= peak_start_time:
+                self.logger.warning(
+                    f"Peak check running late! Current time {now.strftime('%H:%M')} "
+                    f"is after peak start {peak_config.peak_start_time}"
+                )
+
+            # Get hourly forecast from provider
+            try:
+                today = datetime.now()
+                hourly_forecast, provider = self.forecast_manager.get_hourly_forecast_for_date(
+                    today
+                )
+
+                # Sum up generation from now until peak window ends
+                peak_window_wh = 0
+                for forecast_time, watts in hourly_forecast.items():
+                    # Strip timezone info from forecast_time for comparison
+                    if hasattr(forecast_time, "tzinfo") and forecast_time.tzinfo is not None:
+                        forecast_time_naive = forecast_time.replace(tzinfo=None)
+                    else:
+                        forecast_time_naive = forecast_time
+
+                    # Only include hours from now until peak end
+                    if current_hour <= forecast_time_naive <= peak_end:
+                        # Convert watts to watt-hours for 1 hour
+                        peak_window_wh += watts
+
+                self.logger.info(
+                    f"Peak window forecast ({now.strftime('%H:%M')} to "
+                    f"{peak_end.strftime('%H:%M')}): {peak_window_wh:.0f}Wh "
+                    f"from {provider}"
+                )
+
+                return peak_window_wh, provider
+
+            except Exception as e:
+                self.logger.warning(f"Could not get hourly forecast: {e}")
+                # Fallback to daily forecast with reliability factor
+                return await self._get_remaining_forecast()
+
+        except Exception as e:
+            self.logger.error(f"Error calculating peak window forecast: {e}")
+            # Final fallback
+            return 3000, "conservative_estimate"
 
     def _get_forecast_from_predictions_csv(self, target_date: datetime) -> float:
         """
@@ -276,7 +387,7 @@ class AfternoonPeakChecker:
             return forecast_wh
 
         except Exception as e:
-            self.logger.debug(f"Error reading predictions.csv: {e}")
+            self.logger.error(f"Error reading predictions.csv: {e}")
             return 0
 
     async def _apply_boost_settings(self, target_soc: int) -> None:
@@ -420,7 +531,6 @@ async def main():
     finally:
         # Log API usage summary before exit
         tracker.log_summary()
-        tracker.save_daily_summary()
 
 
 if __name__ == "__main__":

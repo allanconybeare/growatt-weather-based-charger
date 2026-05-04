@@ -22,6 +22,7 @@
 ### 📖 [Guides](guides/)
 **Step-by-step how-to documentation**
 
+- **INVERTER_STATUS_CHECK.md** – Monitor inverter health, detect offline events, configure email/desktop alerts
 - **PEAK_WINDOW_CONFIG_GUIDE.md** – Configure afternoon peak window checking
 - **multi_provider_setup_guide.md** – Add and manage forecast providers
 - **DEPLOYMENT_READY.md** – Deployment checklist and production setup
@@ -55,6 +56,9 @@
 #### ...configure the peak window (afternoon charging)
 → Read **[PEAK_WINDOW_CONFIG_GUIDE.md](guides/PEAK_WINDOW_CONFIG_GUIDE.md)**
 
+#### ...monitor the inverter for offline/fault events
+→ Read **[INVERTER_STATUS_CHECK.md](guides/INVERTER_STATUS_CHECK.md)**
+
 #### ...add a new forecast provider
 → Read **[multi_provider_setup_guide.md](guides/multi_provider_setup_guide.md)**
 
@@ -79,6 +83,7 @@ docs/
 ├── README.md              ← You are here
 │
 ├── guides/               # How-to guides and tutorials
+│   ├── INVERTER_STATUS_CHECK.md
 │   ├── PEAK_WINDOW_CONFIG_GUIDE.md
 │   ├── multi_provider_setup_guide.md
 │   └── DEPLOYMENT_READY.md
@@ -102,7 +107,8 @@ docs/
 ## 🔍 Quick Navigation
 
 | Need | File | Purpose |
-|------|------|---------|
+|------|------|------------------------------------------------------|
+| Inverter monitoring | `INVERTER_STATUS_CHECK.md` | Set up offline detection & alerts |
 | Configuration example | `PEAK_WINDOW_CONFIG_GUIDE.md` | Learn peak window settings |
 | System design | `ARCHITECTURE_DIAGRAMS.md` | Understand components |
 | Charging logic | `BATTERY_HEALTH_AND_CHARGE_RATE_ANALYSIS.md` | How rate is calculated |
@@ -121,5 +127,5 @@ docs/
 
 ---
 
-**Last Updated**: November 14, 2025  
+**Last Updated**: May 4, 2026
 **Status**: ✅ Active & Current

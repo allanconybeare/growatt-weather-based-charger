@@ -1,11 +1,13 @@
 """Solcast solar forecast provider."""
 
+import logging
 from datetime import datetime
 from typing import Dict, Optional
 
 import requests
 
-from ..api_usage_tracker import get_global_tracker, get_quota_status, record_api_call
+from ..api_usage_tracker import can_make_calls, record_api_call
+from ..forecast_cache import ForecastCache
 from .base import (
     AuthenticationError,
     ForecastProvider,
@@ -13,6 +15,9 @@ from .base import (
     NetworkError,
     RateLimitError,
 )
+
+# Don't create module-level logger - get it in __init__ instead
+# logger = logging.getLogger(__name__)
 
 
 class SolcastProvider(ForecastProvider):
@@ -22,7 +27,7 @@ class SolcastProvider(ForecastProvider):
     version = "1.0.0"
     requires_api_key = True
 
-    def __init__(self, config):
+    def __init__(self, config, cache: Optional[ForecastCache] = None):
         """
         Initialize Solcast provider.
 
@@ -33,8 +38,17 @@ class SolcastProvider(ForecastProvider):
                 - latitude: Site latitude
                 - longitude: Site longitude
                 - azimuth: Panel azimuth (Forecast.Solar format: 0=South)
+            cache: Optional ForecastCache instance for caching API responses
         """
         super().__init__(config)
+
+        # Get logger as child of root logger (will inherit configured handlers)
+        # self.logger = logging.getLogger("growatt-charger.forecast_solar")
+        # Use module name - automatically inherits from configured root logger
+        self.logger = logging.getLogger(__name__)
+
+        # Set up API Response cache
+        self.cache = cache  # Injected cache instance
 
         # Get Solcast-specific config
         self.api_key = getattr(config, "api_key", None)
@@ -116,6 +130,8 @@ class SolcastProvider(ForecastProvider):
         headers = {"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"}
 
         try:
+            # NO QUOTA CHECK HERE - it's done once in get_forecast()
+
             response = requests.get(url, headers=headers, params=params, timeout=30)
 
             # Extract rate limit information from response headers
@@ -146,24 +162,18 @@ class SolcastProvider(ForecastProvider):
                 )
             except Exception as e:
                 # Don't let tracking errors break API calls
-                import logging
-
-                logger = logging.getLogger(__name__)
-                logger.debug(f"Failed to record API usage: {str(e)}")
+                self.logger.debug(f"Failed to record API usage: {str(e)}")
 
             # Check for rate limiting
             if response.status_code == 429:
                 # Log detailed warning about quota exhaustion
-                import logging
-
-                logger = logging.getLogger("growatt-charger")
                 reset_dt = None
                 if quota_remaining is not None:
                     reset_header = response.headers.get("x-rate-limit-reset")
                     if reset_header:
                         try:
                             reset_dt = datetime.fromtimestamp(int(reset_header))
-                            logger.warning(
+                            self.logger.warning(
                                 "Solcast quota exhausted! Cannot make more calls "
                                 f"until {reset_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC. "
                                 f"Remaining: {quota_remaining}, "
@@ -227,12 +237,6 @@ class SolcastProvider(ForecastProvider):
 
             # Only log if we have at least some rate limit info
             if any(v != "unknown" for v in [limit, remaining, reset]):
-                # Import logging at method level to avoid circular imports
-                import logging
-
-                # Use the main application logger to ensure output appears in logs
-                logger = logging.getLogger("growatt-charger")
-
                 remaining_int = int(remaining) if remaining != "unknown" else None
                 limit_int = int(limit) if limit != "unknown" else None
                 reset_int = int(reset) if reset != "unknown" else None
@@ -244,13 +248,14 @@ class SolcastProvider(ForecastProvider):
                 # usage tracker
                 if remaining_int is not None and limit_int is None:
                     # Known Solcast hobbyist tier limit: 10 calls per 24-hour rolling window
-                    # Calculate actual remaining from total calls made
                     known_limit = 10
 
-                    # Get tracker to find actual calls made
+                    # Get tracker to find actual calls made (CORRECTED)
+                    from ..api_usage_tracker import get_global_tracker
+
                     tracker = get_global_tracker()
-                    stats = tracker.usage_stats.get("solcast", {})
-                    total_calls_made = stats.get("total_calls", 0)
+                    quota_status = tracker.get_quota_status("solcast")
+                    total_calls_made = quota_status.get("calls_in_window", 0)
 
                     # Calculate actual remaining
                     actual_remaining = known_limit - total_calls_made
@@ -272,74 +277,33 @@ class SolcastProvider(ForecastProvider):
                 # Log useful information
                 if remaining_int is not None and limit_int is not None:
                     percent_used = ((limit_int - remaining_int) / limit_int) * 100
-                    logger.info(
+                    self.logger.info(
                         f"Solcast API quota: {remaining_int}/{limit_int} calls remaining "
                         f"({percent_used:.1f}% used){reset_time_str}"
                     )
 
                     # Warn if getting close to limit
                     if remaining_int <= 2:
-                        logger.warning(
+                        self.logger.warning(
                             f"Solcast API quota critically low: only {remaining_int} "
                             "calls remaining! "
                             "Consider using an unmetered API key or waiting for "
                             f"quota reset.{reset_time_str}"
                         )
                     elif remaining_int <= 5:
-                        logger.info(
+                        self.logger.info(
                             f"Solcast API quota approaching limit: {remaining_int} "
                             f"calls remaining{reset_time_str}"
                         )
                 else:
                     # Fallback format if we can't parse as integers
-                    logger.info(
+                    self.logger.info(
                         f"Solcast API rate limit - Limit: {limit}, "
                         f"Remaining: {remaining}, Reset: {reset}{reset_time_str}"
                     )
         except Exception as e:
             # Silently fail rate limit logging - don't let it break forecast fetching
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.debug(f"Could not parse Solcast rate limit headers: {str(e)}")
-
-    def _check_quota_available(self, required_calls: int = 1, min_buffer: int = 1) -> bool:
-        """
-        Check if sufficient quota is available before making API calls.
-
-        This prevents wasting calls when quota is exhausted or critically low.
-
-        Args:
-            required_calls: Number of API calls we want to make
-            min_buffer: Minimum calls to keep in reserve (default 1 to avoid hitting limit)
-
-        Returns:
-            True if enough quota available, False if should skip (quota exhausted or too low)
-        """
-        quota_status = get_quota_status("solcast")
-
-        remaining = quota_status.get("quota_remaining")
-
-        # If we don't know the remaining quota, assume we can proceed (first call or no tracking)
-        if remaining is None:
-            return True
-
-        # Check if we have enough quota
-        needed = required_calls + min_buffer
-        if remaining < needed:
-            import logging
-
-            logger = logging.getLogger("growatt-charger")
-
-            status = quota_status.get("status", "UNKNOWN")
-            logger.warning(
-                f"Solcast quota check: insufficient quota to proceed. "
-                f"Remaining: {remaining}, Need: {needed}, Status: {status}. "
-                f"Skipping Solcast forecast. Will use fallback provider."
-            )
-            return False
-
-        return True
+            self.logger.debug(f"Could not parse Solcast rate limit headers: {str(e)}")
 
     def get_forecast(self) -> Dict:
         """
@@ -355,22 +319,35 @@ class SolcastProvider(ForecastProvider):
             RateLimitError: If quota exhausted
             ForecastProviderError: If forecast cannot be retrieved
         """
+        # Try cache first
+        if self.cache:
+            # Build config for cache key (resource IDs define the "array config" for Solcast)
+            cache_config = {"resource_ids": self.resource_ids} if self.resource_ids else None
+            # Use longer TTL for Solcast (7 hours) due to stricter rate limits
+            # self.logger.info("Solcast cache TTL override: 7.0")
+            # cached = self.cache.get("solcast", datetime.now(), cache_config, ttl_hours=7.0)
+            # Use default TTL (configurable in the config) for visability.
+            # Overriding here is likely to cause confusion, better to use the main config!
+            cached = self.cache.get("solcast", datetime.now(), cache_config)
+            if cached:
+                self.logger.info("Using cached Solcast forecast")
+                return cached
+
         # Determine how many calls we need
         num_calls_needed = len(self.resource_ids) if self.resource_ids else 1
 
-        # Check quota before proceeding
-        # We need num_calls_needed + 1 buffer to avoid hitting the exact limit
-        if not self._check_quota_available(required_calls=num_calls_needed, min_buffer=1):
-            raise RateLimitError(
-                f"Insufficient quota: need {num_calls_needed} call(s), quota exhausted", "Solcast"
-            )
+        # PRE-FLIGHT CHECK: Do we have quota available?
+        can_proceed, reason = can_make_calls("solcast", num_calls=num_calls_needed)
+        if not can_proceed:
+            self.logger.warning(f"Skipping Solcast forecast: {reason}")
+            raise RateLimitError(reason, "Solcast")
 
+        # Fetch from API
         if self.resource_ids:
-            # If multiple resources, fetch each and combine
             if len(self.resource_ids) == 1:
-                return self._get_resource_forecast(self.resource_ids[0])
+                data = self._get_resource_forecast(self.resource_ids[0])
             else:
-                return self._get_combined_forecast()
+                data = self._get_combined_forecast()
         else:
             # Use world radiation endpoint (requires paid tier)
             endpoint = "world_pv_power/forecasts"
@@ -382,7 +359,14 @@ class SolcastProvider(ForecastProvider):
                 "azimuth": self.azimuth,
                 "format": "json",
             }
-            return self._make_request(endpoint, params)
+            data = self._make_request(endpoint, params)
+
+        # Store in cache
+        if self.cache:
+            cache_config = {"resource_ids": self.resource_ids} if self.resource_ids else None
+            self.cache.set("solcast", datetime.now(), data, cache_config)
+
+        return data
 
     def _get_resource_forecast(self, resource_id: str) -> Dict:
         """Get forecast for a single resource."""

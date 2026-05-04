@@ -11,6 +11,7 @@ A tool for configuring overnight charging for Growatt inverters with batteries, 
 - ⏰ **Schedules battery boost** before afternoon peak rates (if needed)
 - 📊 **Logs performance** to track SOC, generation, and charging decisions
 - 🎯 **Works with Growatt inverters** via [PyPi growattServer](https://github.com/indykoning/PyPi_GrowattServer)
+- 🔔 **Monitors inverter health** and sends email/desktop alerts when the inverter goes offline
 
 ## Usage
 This software can be run either as a Docker container or directly from the source code. Log files are written to:
@@ -102,7 +103,20 @@ Key settings in `conf/growatt-charger.ini`:
 | `peak_end_time` | When expensive rates end (e.g., 19:00) |
 | `location` | Your address or coordinates |
 | `kw_power` | Solar panel capacity (e.g., 6.1kW) |
+| `email.enabled` | Set to `true` to enable alert emails |
+| `email.smtp_server` | SMTP hostname (or env: `SMTP_SERVER`) |
+| `email.recipient_email` | Address to send alerts to (or env: `RECIPIENT_EMAIL`) |
 
 See [docs/guides/PEAK_WINDOW_CONFIG_GUIDE.md](docs/guides/PEAK_WINDOW_CONFIG_GUIDE.md) for details.
 
-## How It Works
+## Scheduled Scripts
+
+Beyond the main overnight charger, three additional scripts can be run on a schedule:
+
+| Script | Recommended schedule | Purpose |
+|--------|---------------------|---------|
+| `check_inverter_status.py` | Every 2 hours, 06:00–22:00 | Detects when the inverter goes offline (e.g. tripped switch on solar board) and sends an email + desktop alert |
+| `morning_soc_check.py` | Daily at 05:00 | Compares actual SOC after overnight charging against the predicted target |
+| `afternoon_peak_check.py` | Daily at 14:00 | Decides whether to boost battery charge before the evening peak window |
+
+Windows Task Scheduler setup scripts are provided for each — see [docs/guides/INVERTER_STATUS_CHECK.md](docs/guides/INVERTER_STATUS_CHECK.md) for the inverter monitor setup.

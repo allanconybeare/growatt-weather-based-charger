@@ -109,6 +109,34 @@ class ForecastSolarMultiArray:
             print(f"Error: {e}")
             return None
 
+    @staticmethod
+    def safe_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def read_rate_limit(response, data, default_limit, default_remaining):
+        limit_header = response.headers.get("X-Ratelimit-Limit")
+        remain_header = response.headers.get("X-Ratelimit-Remaining")
+
+        limit = ForecastSolarMultiArray.safe_int(limit_header, None)
+        remaining = ForecastSolarMultiArray.safe_int(remain_header, None)
+
+        if limit is None or remaining is None:
+            print("  No rate limit info in response headers, checking body...")
+            message = data.get("message", {})
+            block = message.get("ratelimit", {})
+            if limit is None:
+                limit = ForecastSolarMultiArray.safe_int(block.get("limit"), default_limit)
+            if remaining is None:
+                remaining = ForecastSolarMultiArray.safe_int(
+                    block.get("remaining"), default_remaining
+                )
+
+        return limit, remaining
+
     def _fetch_single_array(self, declination, azimuth, kwp):
         """Fetch forecast for a single array"""
         if self.api_key:
@@ -129,12 +157,21 @@ class ForecastSolarMultiArray:
             response.raise_for_status()
             data = response.json()
 
-            # Check rate limit info
-            if "X-Ratelimit-Limit" in response.headers:
-                rate_remaining = response.headers["X-Ratelimit-Remaining"]
-                rate_limit = response.headers["X-Ratelimit-Limit"]
-                print(f"  Rate limit: {rate_remaining}/{rate_limit}")
+            # # Check rate limit info
+            # if "X-Ratelimit-Limit" in response.headers:
+            #     rate_limit = int(response.headers.get("X-Ratelimit-Limit", 12))
+            #     rate_remaining = int(response.headers.get("X-Ratelimit-Remaining", 0))
+            #     print(f"  Rate limit: {rate_remaining}/{rate_limit}")
+            # else:
+            #     print("  No rate limit info in response headers")
 
+            rate_limit, rate_remaining = ForecastSolarMultiArray.read_rate_limit(
+                response, data, default_limit=12, default_remaining=0
+            )
+
+            print(f" Rate limit: {rate_remaining}/{rate_limit}")
+
+            print(f"  Forecast fetched successfully: {data}")
             return data
         except requests.exceptions.HTTPError as e:
             print(f"  HTTP Error: {e}")
@@ -315,19 +352,19 @@ if __name__ == "__main__":
             "declination": TILT,
             "azimuth": -90,  # East
             "kwp": 6 * PANEL_WATTS,  # 2.32 kWp (6 panels)
-        },
-        {
-            "name": "South Array",
-            "declination": TILT,
-            "azimuth": 0,  # South
-            "kwp": 3 * PANEL_WATTS,  # 1.16 kWp (3 panels)
-        },
-        {
-            "name": "West Array",
-            "declination": TILT,
-            "azimuth": 90,  # West
-            "kwp": 6 * PANEL_WATTS,  # 2.32 kWp (6 panels)
-        },
+        }  # ,
+        # {
+        #     "name": "South Array",
+        #     "declination": TILT,
+        #     "azimuth": 0,  # South
+        #     "kwp": 3 * PANEL_WATTS,  # 1.16 kWp (3 panels)
+        # },
+        # {
+        #     "name": "West Array",
+        #     "declination": TILT,
+        #     "azimuth": 90,  # West
+        #     "kwp": 6 * PANEL_WATTS,  # 2.32 kWp (6 panels)
+        # },
     ]
 
     # Initialize forecaster (no API key = free public API)

@@ -96,7 +96,8 @@ def calculate_peak_window_boost_target(
     peak_window_hours: float = 3.0,
     forecast_reliability: float = 0.4,
     soc_safety_margin_pct: float = 10.0,
-    max_soc: float = 95.0,
+    minimum_soc_pct: float = 15.0,
+    max_soc: float = 85.0,
 ) -> Tuple[int, str]:
     """
     Calculate optimal target SOC for afternoon boost.
@@ -106,7 +107,8 @@ def calculate_peak_window_boost_target(
 
     Args:
         (same as should_boost_battery_for_peak_window)
-        max_soc: Maximum SOC to target (safety limit, default 95%)
+        minimum_soc_pct: Minimum SOC the battery can discharge to (default 15%)
+        max_soc: Maximum SOC to target (safety limit, default 85%)
 
     Returns:
         Tuple of (target_soc, reason)
@@ -119,6 +121,7 @@ def calculate_peak_window_boost_target(
         peak_window_hours=peak_window_hours,
         forecast_reliability=forecast_reliability,
         soc_safety_margin_pct=soc_safety_margin_pct,
+        minimum_soc_pct=minimum_soc_pct,
     )
 
     if not should_boost:

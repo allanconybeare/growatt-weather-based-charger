@@ -92,7 +92,7 @@ class PeakWindowConfig:
     peak_end_time: str
     check_time: str
     forecast_reliability: float = 0.4
-    soc_safety_margin_pct: float = 10.0
+    forecast_uncertainty_buffer_pct: float = 10.0
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -101,7 +101,7 @@ class PeakWindowConfig:
         self._validate_time_format("check_time")
         self._validate_time_order()
         self._validate_float_range("forecast_reliability", 0.0, 1.0)
-        self._validate_float_range("soc_safety_margin_pct", 0.0, 100.0)
+        self._validate_float_range("forecast_uncertainty_buffer_pct", 0.0, 100.0)
 
     def _validate_time_format(self, field_name: str):
         """Validate time format (HH:MM)."""
@@ -210,6 +210,51 @@ class SolcastConfig:
             raise GrowattConfigError("Solcast API key is required")
 
 
+@dataclass
+class EmailConfig:
+    """Email notification configuration."""
+
+    enabled: bool
+    smtp_server: str
+    smtp_port: int
+    sender_email: str
+    sender_password: str
+    sender_name: str
+    recipient_email: str
+
+    def __post_init__(self):
+        if not self.enabled:
+            return
+        missing = [
+            f
+            for f in ("smtp_server", "sender_email", "sender_password", "recipient_email")
+            if not getattr(self, f)
+        ]
+        if missing:
+            raise GrowattConfigError(
+                "Email notifications are enabled but the following settings are missing: "
+                f"{', '.join(missing)}. "
+                "Set them in [email] section of the config file or via environment variables."
+            )
+        if not 1 <= self.smtp_port <= 65535:
+            raise GrowattConfigError(f"smtp_port must be between 1 and 65535, got {self.smtp_port}")
+
+
+@dataclass
+class APIResponseCacheConfig:
+    enabled: bool
+    cache_dir: str
+    ttl_hours: float
+
+    @classmethod
+    def from_section(cls, section):
+        return cls(
+            enabled=section.getboolean("enabled", fallback=True),
+            cache_dir=section.get("cache_dir", fallback="output/cache"),
+            ttl_hours=section.getfloat("ttl_hours", fallback=4.0),
+        )
+
+
 class ConfigManager:
     """Configuration manager for the application."""
 
@@ -222,7 +267,13 @@ class ConfigManager:
         """
         self.config_path = config_path
         self.config = ConfigParser()
+
         self._load_config()
+
+        if "cache" in self.config:
+            self.cache = APIResponseCacheConfig.from_section(self.config["cache"])
+        else:
+            self.cache = APIResponseCacheConfig(True, "output/cache", 4.0)
 
     def _load_config(self) -> None:
         """Load and validate configuration file."""
@@ -358,7 +409,41 @@ class ConfigManager:
             peak_end_time=section.get("peak_end_time"),
             check_time=section.get("check_time"),
             forecast_reliability=section.getfloat("forecast_reliability", fallback=0.4),
-            soc_safety_margin_pct=section.getfloat("soc_safety_margin_pct", fallback=10.0),
+            forecast_uncertainty_buffer_pct=section.getfloat(
+                "forecast_uncertainty_buffer_pct", fallback=10.0
+            ),
+        )
+
+    @property
+    def email(self) -> EmailConfig:
+        """Get email notification configuration."""
+        section = self.config["email"] if "email" in self.config else {}
+
+        def get(key, env_var, fallback=""):
+            return os.getenv(env_var) or (section.get(key, fallback) if section else fallback)
+
+        enabled_raw = (section.get("enabled", "false") if section else "false").lower()
+        enabled = enabled_raw in ("true", "yes", "1", "on")
+
+        sender_email = get("sender_email", "SENDER_EMAIL")
+        sender_name = get("sender_name", "SENDER_NAME", fallback="Solar Tracker")
+        if not sender_name and sender_email:
+            sender_name = sender_email
+
+        smtp_port_raw = get("smtp_port", "SMTP_PORT", fallback="587")
+        try:
+            smtp_port = int(smtp_port_raw)
+        except (ValueError, TypeError):
+            smtp_port = 587
+
+        return EmailConfig(
+            enabled=enabled,
+            smtp_server=get("smtp_server", "SMTP_SERVER"),
+            smtp_port=smtp_port,
+            sender_email=sender_email,
+            sender_password=get("sender_password", "SENDER_PASSWORD"),
+            sender_name=sender_name,
+            recipient_email=get("recipient_email", "RECIPIENT_EMAIL"),
         )
 
     @property

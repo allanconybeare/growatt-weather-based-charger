@@ -20,7 +20,13 @@ class ForecastManager:
         "forecast.solar": ForecastSolarProvider,
     }
 
-    def __init__(self, config, providers: List[str] = None, primary_provider: str = None):
+    def __init__(
+        self,
+        config,
+        providers: List[str] = None,
+        primary_provider: str = None,
+        cache=None,
+    ):
         """
         Initialize forecast manager.
 
@@ -28,10 +34,15 @@ class ForecastManager:
             config: Configuration object
             providers: List of provider names to use (e.g. ['solcast', 'forecast.solar'])
             primary_provider: Name of primary provider (used for charging decisions)
+            cache: Optional ForecastCache instance for caching API responses
         """
         self.config = config
         self.providers = {}
         self.primary_provider_name = primary_provider
+        self.cache = cache  # Store cache for passing to providers
+
+        # Use module name - automatically inherits from configured root logger
+        self.logger = logging.getLogger(__name__)
 
         # If no providers specified, use only the primary
         if not providers and primary_provider:
@@ -43,9 +54,9 @@ class ForecastManager:
         for provider_name in providers:
             try:
                 self.providers[provider_name] = self._create_provider(provider_name)
-                logger.info(f"Initialized forecast provider: {provider_name}")
+                self.logger.info(f"Initialized forecast provider: {provider_name}")
             except Exception as e:
-                logger.error(f"Failed to initialize provider {provider_name}: {e}")
+                self.logger.error(f"Failed to initialize provider {provider_name}: {e}")
 
         if not self.providers:
             raise ForecastProviderError("No forecast providers could be initialized")
@@ -55,7 +66,9 @@ class ForecastManager:
             self.primary_provider_name = primary_provider
         else:
             self.primary_provider_name = list(self.providers.keys())[0]
-            logger.warning(f"Primary provider not available, using {self.primary_provider_name}")
+            self.logger.warning(
+                f"Primary provider not available, using {self.primary_provider_name}"
+            )
 
     def _create_provider(self, provider_name: str) -> ForecastProvider:
         """
@@ -78,7 +91,8 @@ class ForecastManager:
         # Get provider-specific config
         provider_config = self._get_provider_config(provider_name)
 
-        return provider_class(provider_config)
+        # Pass cache to provider
+        return provider_class(provider_config, cache=self.cache)
 
     def _get_provider_config(self, provider_name: str):
         """
@@ -143,7 +157,7 @@ class ForecastManager:
                 forecast = provider.get_forecast_for_date(target_date)
                 return forecast, self.primary_provider_name
             except Exception as e:
-                logger.warning(f"Primary provider {self.primary_provider_name} failed: {e}")
+                self.logger.warning(f"Primary provider {self.primary_provider_name} failed: {e}")
 
         # Try other providers as fallback
         for name, provider in self.providers.items():
@@ -152,10 +166,10 @@ class ForecastManager:
 
             try:
                 forecast = provider.get_forecast_for_date(target_date)
-                logger.info(f"Using fallback provider: {name}")
+                self.logger.info(f"Using fallback provider: {name}")
                 return forecast, name
             except Exception as e:
-                logger.warning(f"Provider {name} failed: {e}")
+                self.logger.warning(f"Provider {name} failed: {e}")
 
         raise ForecastProviderError("All forecast providers failed")
 
@@ -176,7 +190,7 @@ class ForecastManager:
                 forecast = provider.get_forecast_for_date(target_date)
                 forecasts[name] = forecast
             except Exception as e:
-                logger.error(f"Provider {name} failed: {e}")
+                self.logger.error(f"Provider {name} failed: {e}")
                 forecasts[name] = None
 
         return forecasts
@@ -200,7 +214,7 @@ class ForecastManager:
                 hourly = provider.get_hourly_forecast_for_date(target_date)
                 return hourly, self.primary_provider_name
             except Exception as e:
-                logger.warning(f"Primary provider {self.primary_provider_name} failed: {e}")
+                self.logger.warning(f"Primary provider {self.primary_provider_name} failed: {e}")
 
         # Fallback
         for name, provider in self.providers.items():
@@ -209,10 +223,10 @@ class ForecastManager:
 
             try:
                 hourly = provider.get_hourly_forecast_for_date(target_date)
-                logger.info(f"Using fallback provider for hourly: {name}")
+                self.logger.info(f"Using fallback provider for hourly: {name}")
                 return hourly, name
             except Exception as e:
-                logger.warning(f"Provider {name} failed: {e}")
+                self.logger.warning(f"Provider {name} failed: {e}")
 
         raise ForecastProviderError("All forecast providers failed")
 
@@ -228,9 +242,9 @@ class ForecastManager:
         for name, provider in self.providers.items():
             try:
                 results[name] = provider.test_connection()
-                logger.info(f"Provider {name}: {'OK' if results[name] else 'FAILED'}")
+                self.logger.info(f"Provider {name}: {'OK' if results[name] else 'FAILED'}")
             except Exception as e:
                 results[name] = False
-                logger.error(f"Provider {name} test failed: {e}")
+                self.logger.error(f"Provider {name} test failed: {e}")
 
         return results

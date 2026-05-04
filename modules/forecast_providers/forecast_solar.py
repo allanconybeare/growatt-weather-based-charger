@@ -6,18 +6,27 @@ from typing import Dict, List, Optional
 
 import requests
 
-from ..api_usage_tracker import record_api_call
-from .base import ForecastProvider, ForecastProviderError, NetworkError
+from ..api_usage_tracker import can_make_calls, record_api_call
+from ..forecast_cache import ForecastCache
+from .base import (
+    ForecastProvider,
+    ForecastProviderError,
+    NetworkError,
+    RateLimitError,
+)
+
+# Don't create module-level logger - get it in __init__ instead
+# logger = logging.getLogger(__name__)
 
 
 class ForecastSolarProvider(ForecastProvider):
     """Forecast.Solar API forecast provider with multi-array support."""
 
     BASE_URL = "https://api.forecast.solar"
-    version = "2.0.0"  # Updated for multi-array support
+    version = "2.0.0"
     requires_api_key = False
 
-    def __init__(self, config):
+    def __init__(self, config, cache: Optional[ForecastCache] = None):
         """
         Initialize Forecast.Solar provider with support for multiple arrays.
 
@@ -30,8 +39,17 @@ class ForecastSolarProvider(ForecastProvider):
                 - kwp: System size in kW peak - single array
                 - arrays: Optional list of ForecastArrayConfig for multi-array setups
                 - damping: Damping factor for morning/evening (0-1)
+            cache: Optional ForecastCache instance for caching API responses
         """
         super().__init__(config)
+
+        # Get logger as child of root logger (will inherit configured handlers)
+        # self.logger = logging.getLogger("growatt-charger.forecast_solar")
+        # Use module name - automatically inherits from configured root logger
+        self.logger = logging.getLogger(__name__)
+
+        # Set up API Response cache
+        self.cache = cache  # Injected cache instance
 
         self.latitude = getattr(config, "latitude", None)
         self.longitude = getattr(config, "longitude", None)
@@ -39,9 +57,7 @@ class ForecastSolarProvider(ForecastProvider):
         self.azimuth = getattr(config, "azimuth", 0)
         self.kwp = getattr(config, "kwp", 5.8)
         self.damping = getattr(config, "damping", 0.1)
-        self.arrays = getattr(config, "arrays", None)  # Multi-array config
-
-        self.logger = logging.getLogger("growatt-charger")
+        self.arrays = getattr(config, "arrays", None)
 
         if not self.latitude or not self.longitude:
             raise ForecastProviderError(
@@ -51,6 +67,7 @@ class ForecastSolarProvider(ForecastProvider):
     def get_forecast(self) -> Dict:
         """
         Get solar generation forecast from Forecast.Solar.
+        Get forecast, using cache if available.
 
         Supports both single-array (uses declination/azimuth/kwp) and
         multi-array configurations (uses arrays list). Each array query
@@ -61,15 +78,76 @@ class ForecastSolarProvider(ForecastProvider):
 
         Raises:
             NetworkError: If API call fails
+            RateLimitError: If quota exhausted
         """
-        # If arrays are configured, fetch and combine them
+
+        target_date = datetime.now()  # or tomorrow depending on your logic
+
+        # Try cache first
+        if self.cache:
+            # Build array config for cache key
+            array_config = None
+            if self.arrays:
+                array_config = {
+                    "arrays": [
+                        {"declination": a.declination, "azimuth": a.azimuth, "kwp": a.kwp}
+                        for a in self.arrays
+                    ]
+                }
+            cached = self.cache.get("forecast.solar", target_date, array_config)
+            if cached:
+                self.logger.info("Using cached Forecast.Solar data")
+                return cached
+
+        # Fetch from API
         if self.arrays:
-            return self._get_multi_array_forecast()
+            data = self._get_multi_array_forecast()
         else:
-            return self._get_single_array_forecast()
+            data = self._get_single_array_forecast()
+
+        # Store in cache
+        if self.cache:
+            array_config = None
+            if self.arrays:
+                array_config = {
+                    "arrays": [
+                        {"declination": a.declination, "azimuth": a.azimuth, "kwp": a.kwp}
+                        for a in self.arrays
+                    ]
+                }
+            self.cache.set("forecast.solar", target_date, data, array_config)
+
+        return data
+
+    @staticmethod
+    def _safe_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _read_rate_limit(self, response, data, default_limit, default_remaining):
+        limit_header = response.headers.get("X-Ratelimit-Limit")
+        remain_header = response.headers.get("X-Ratelimit-Remaining")
+
+        limit = self._safe_int(limit_header, None)
+        remaining = self._safe_int(remain_header, None)
+
+        if limit is None or remaining is None:
+            self.logger.warning("No rate limit info in response headers, checking body")
+            message = data.get("message", {})
+            block = message.get("ratelimit", {})
+            if limit is None:
+                limit = self._safe_int(block.get("limit"), default_limit)
+            if remaining is None:
+                remaining = self._safe_int(block.get("remaining"), default_remaining)
+
+        return limit, remaining
 
     def _get_single_array_forecast(self) -> Dict:
         """Fetch forecast for single array configuration."""
+        self.logger.debug("Fetching single-array forecast")
+
         url = (
             f"{self.BASE_URL}/estimate/"
             f"{self.latitude}/{self.longitude}/"
@@ -84,11 +162,20 @@ class ForecastSolarProvider(ForecastProvider):
             self.logger.debug(f"Fetching single-array forecast from {url}")
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
+            data = response.json()
 
             # Record API call for rate limit tracking
             try:
-                rate_remaining = int(response.headers.get("X-Ratelimit-Remaining", 0))
-                rate_limit = int(response.headers.get("X-Ratelimit-Limit", 12))
+                rate_limit, rate_remaining = self._read_rate_limit(
+                    response, data, default_limit=12, default_remaining=0
+                )
+
+                self.logger.info(
+                    f"Single array fetch complete - Rate limit: {rate_remaining}/"
+                    f"{rate_limit} remaining"
+                )
+                self.logger.debug(f"Data: {data}")
+
                 record_api_call(
                     provider="forecast.solar",
                     endpoint="estimate/single",
@@ -96,15 +183,17 @@ class ForecastSolarProvider(ForecastProvider):
                     quota_remaining=rate_remaining,
                     quota_limit=rate_limit,
                 )
+
                 if rate_remaining <= 2:
                     self.logger.warning(
                         f"Forecast.Solar rate limit approaching: {rate_remaining}/{rate_limit} "
                         "calls remaining"
                     )
             except Exception as e:
-                self.logger.debug(f"Could not track API usage: {e}")
+                self.logger.error(f"Could not track API usage: {e}")
 
-            return response.json()
+            return data
+
         except requests.exceptions.Timeout:
             raise NetworkError("Request timeout", "Forecast.Solar")
         except requests.exceptions.RequestException as e:
@@ -122,6 +211,13 @@ class ForecastSolarProvider(ForecastProvider):
                 "Multi-array forecast called but no arrays configured", "Forecast.Solar"
             )
 
+        # PRE-FLIGHT CHECK: Do we have quota for all arrays?
+        num_calls = len(self.arrays)
+        can_proceed, reason = can_make_calls("forecast.solar", num_calls=num_calls)
+        if not can_proceed:
+            self.logger.warning(f"Insufficient quota for {num_calls} arrays: {reason}")
+            raise RateLimitError(reason, "Forecast.Solar")
+
         self.logger.info(
             f"Fetching forecasts for {len(self.arrays)} "
             f"arrays (will use {len(self.arrays)} API calls)"
@@ -137,7 +233,7 @@ class ForecastSolarProvider(ForecastProvider):
             )
 
             try:
-                forecast = self._fetch_array_forecast(array)
+                forecast = self._fetch_array_forecast(array, idx)
                 if forecast:
                     all_forecasts.append(
                         {
@@ -160,10 +256,19 @@ class ForecastSolarProvider(ForecastProvider):
 
         # Combine forecasts from all arrays
         combined = self._combine_array_forecasts(all_forecasts, total_kwp)
+        self.logger.info(
+            f"Combined forecast from {len(all_forecasts)} arrays: "
+            f"{combined['result']['watt_hours_total']:.0f}Wh total"
+        )
         return combined
 
-    def _fetch_array_forecast(self, array) -> Optional[Dict]:
-        """Fetch forecast for a single array in multi-array setup."""
+    def _fetch_array_forecast(self, array, array_idx: int = 0) -> Optional[Dict]:
+        """
+        Fetch forecast for a single array in multi-array setup.
+
+        Note: Quota checking is done once in _get_multi_array_forecast()
+        before calling this method, so no need to check again here.
+        """
         url = (
             f"{self.BASE_URL}/estimate/"
             f"{self.latitude}/{self.longitude}/"
@@ -177,11 +282,22 @@ class ForecastSolarProvider(ForecastProvider):
         try:
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
+            data = response.json()
+
+            self.logger.debug(f"DEBUG: url: {url} params: {params} ")
+            self.logger.debug(f"DEBUG: Data: {data}")
 
             # Record API call for rate limit tracking
             try:
-                rate_remaining = int(response.headers.get("X-Ratelimit-Remaining", 0))
-                rate_limit = int(response.headers.get("X-Ratelimit-Limit", 12))
+                rate_limit, rate_remaining = self._read_rate_limit(
+                    response, data, default_limit=12, default_remaining=0
+                )
+
+                self.logger.info(
+                    f"Array {array_idx} fetch complete - "
+                    f"Rate limit: {rate_remaining}/{rate_limit} remaining"
+                )
+
                 record_api_call(
                     provider="forecast.solar",
                     endpoint="estimate/multi-array",
@@ -189,10 +305,17 @@ class ForecastSolarProvider(ForecastProvider):
                     quota_remaining=rate_remaining,
                     quota_limit=rate_limit,
                 )
-            except Exception as e:
-                self.logger.debug(f"Could not track API usage: {e}")
 
-            return response.json()
+                if rate_remaining <= 2:
+                    self.logger.warning(
+                        f"Forecast.Solar rate limit critical: {rate_remaining}/"
+                        f"{rate_limit} remaining"
+                    )
+            except Exception as e:
+                self.logger.error(f"Could not track API usage: {e}")
+
+            return data
+
         except requests.exceptions.Timeout:
             raise NetworkError("Request timeout", "Forecast.Solar")
         except requests.exceptions.RequestException as e:
@@ -235,10 +358,8 @@ class ForecastSolarProvider(ForecastProvider):
 
         for f in forecasts:
             result = f["forecast"].get("result", {})
-            # Collect daily totals
             if "watt_hours_day" in result:
                 all_dates.update(result["watt_hours_day"].keys())
-            # Collect hourly data
             if "watts" in result:
                 all_timestamps.update(result["watts"].keys())
 

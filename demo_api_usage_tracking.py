@@ -1,156 +1,197 @@
 #!/usr/bin/env python3
 """
-Demonstration of Solcast API usage tracking and quota monitoring.
+Demonstration of enhanced API usage tracking with rolling windows.
 
-This script shows how API usage is automatically tracked and reported.
+Shows:
+- Per-provider file storage (no overwrites)
+- Rolling window calculations
+- Solcast 24-hour tracking
+- Forecast.Solar hourly tracking
 """
 
-import logging
-import sys
-from pathlib import Path
+import time
+from datetime import datetime
 
-from modules.api_usage_tracker import get_global_tracker, record_api_call
-
-# Add project root to path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+# Import the enhanced tracker
+from modules.api_usage_tracker import can_make_calls, get_global_tracker, record_api_call
 
 
-# Setup logging to see tracker messages
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+def demo_enhanced_tracking():
+    """Demonstrate the enhanced API tracking features."""
 
-
-def demo_tracking():
-    """Demonstrate API usage tracking functionality."""
-
-    print("=" * 70)
-    print("Solcast API Usage Tracking Demo")
-    print("=" * 70)
+    print("=" * 80)
+    print("ENHANCED API USAGE TRACKER DEMO")
+    print("=" * 80)
     print()
 
-    # Get the global tracker with persistence enabled
-    tracker = get_global_tracker(persistence_dir=str(project_root / "output"))
+    # Initialize tracker with persistence
+    tracker = get_global_tracker(persistence_dir="./output")
 
-    print("📊 Simulating API calls to Solcast...")
+    print("📊 Simulating API calls to multiple providers...")
     print()
 
-    # Simulate successful API calls with quota info
-    print("✅ Call 1: Successful forecast API call")
+    # === SOLCAST CALLS (24-hour rolling window, limit: 10) ===
+    print("=" * 80)
+    print("SOLCAST (24-hour rolling window, limit: 10 calls)")
+    print("=" * 80)
+    print()
+
+    # Simulate a few successful calls
+    for i in range(3):
+        print(f"✅ Call {i+1}: Successful forecast fetch")
+        record_api_call(
+            provider="solcast",
+            endpoint="rooftop_sites/abc123/forecasts",
+            status_code=200,
+            quota_remaining=600 - (i + 1),  # Solcast's misleading header
+            quota_limit=600,
+        )
+        time.sleep(0.1)
+
+    # Simulate a failed call (still counts toward quota!)
+    print("❌ Call 4: Failed request (401 Unauthorized)")
     record_api_call(
         provider="solcast",
-        endpoint="rooftop_sites/{resource_id}/forecasts",
-        status_code=200,
-        quota_remaining=8,
-        quota_limit=10,
-    )
-    print()
-
-    print("✅ Call 2: Another successful call")
-    record_api_call(
-        provider="solcast",
-        endpoint="rooftop_sites/{resource_id}/forecasts",
-        status_code=200,
-        quota_remaining=7,
-        quota_limit=10,
-    )
-    print()
-
-    print("⚠️  Call 3: Call with low quota warning")
-    record_api_call(
-        provider="solcast",
-        endpoint="rooftop_sites/{resource_id}/forecasts",
-        status_code=200,
-        quota_remaining=2,
-        quota_limit=10,
-    )
-    print()
-
-    print("❌ Call 4: Failed API call")
-    record_api_call(
-        provider="solcast",
-        endpoint="world_pv_power/forecasts",
+        endpoint="rooftop_sites/abc123/forecasts",
         status_code=401,
-        quota_remaining=2,
-        quota_limit=10,
         error="Invalid API key",
     )
+
     print()
 
-    # Show stats
-    print("=" * 70)
-    print("📈 Usage Statistics:")
-    print("=" * 70)
+    # Check Solcast quota
+    print("DEBUG: Solcast go get Quota Status")
+    solcast_status = tracker.get_quota_status("solcast")
+    print("Solcast Status:")
+    print(
+        f"  Calls in 24h window: {solcast_status['calls_in_window']}/"
+        f"{solcast_status['quota_limit']}"
+    )
+    print(f"  Remaining: {solcast_status['quota_remaining']}")
+    print(f"  Status: {solcast_status['status']}")
+    if solcast_status["reset_time"]:
+        reset = datetime.fromisoformat(solcast_status["reset_time"])
+        print(f"  Next quota available: {reset.strftime('%Y-%m-%d %H:%M:%S')}")
     print()
 
-    stats = tracker.get_provider_stats("solcast")
-    print(f"Total API calls:      {stats.get('total_calls', 0)}")
-    print(f"Successful calls:     {stats.get('successful_calls', 0)}")
-    print(f"Failed calls:         {stats.get('failed_calls', 0)}")
-    print(f"Quota remaining:      {stats.get('quota_remaining', 'unknown')}")
-    print(f"Quota limit:          {stats.get('quota_limit', 'unknown')}")
-    print(f"Last quota check:     {stats.get('last_quota_check', 'never')}")
+    # Check if we can make more calls
+    can_proceed, reason = can_make_calls("solcast", num_calls=3)
+    print(f"Can make 3 more Solcast calls? {can_proceed}")
+    print(f"Reason: {reason}")
     print()
 
-    # Log summary
-    print("=" * 70)
-    print("📋 Summary Report:")
-    print("=" * 70)
+    # === FORECAST.SOLAR CALLS (1-hour rolling window, limit: 12) ===
+    print("=" * 80)
+    print("FORECAST.SOLAR (1-hour rolling window, limit: 12 calls)")
+    print("=" * 80)
+    print()
+
+    # Simulate multiple array fetches (3 arrays = 3 calls)
+    arrays = ["East", "South", "West"]
+    for i, array in enumerate(arrays, 1):
+        print(f"✅ Call {i}: Fetching forecast for {array} array")
+        record_api_call(
+            provider="forecast.solar",
+            endpoint=f"estimate/{array}",
+            status_code=200,
+            quota_remaining=12 - i,
+            quota_limit=12,
+        )
+        time.sleep(0.1)
+
+    print()
+
+    # Check Forecast.Solar quota
+    fs_status = tracker.get_quota_status("forecast.solar")
+    print("Forecast.Solar Status:")
+    print(f"  Calls in 1h window: {fs_status['calls_in_window']}/{fs_status['quota_limit']}")
+    print(f"  Remaining: {fs_status['quota_remaining']}")
+    print(f"  Status: {fs_status['status']}")
+    if fs_status["reset_time"]:
+        reset = datetime.fromisoformat(fs_status["reset_time"])
+        print(f"  Resets at: {reset.strftime('%H:%M:%S')}")
+    print()
+
+    # === SUMMARY ===
+    print("=" * 80)
+    print("OVERALL SUMMARY")
+    print("=" * 80)
     print()
     tracker.log_summary()
     print()
 
-    # Check for alerts
-    print("=" * 70)
-    print("🚨 Quota Alerts:")
-    print("=" * 70)
+    # === CHECK FOR ALERTS ===
+    print("=" * 80)
+    print("QUOTA ALERTS")
+    print("=" * 80)
     print()
     alerts = tracker.check_quota_alerts()
     if alerts:
         for provider, alert in alerts.items():
             print(f"{provider}: {alert}")
     else:
-        print("No quota alerts")
+        print("✅ No quota alerts - all providers OK")
     print()
 
-    # Save daily summary
-    print("=" * 70)
-    print("💾 Saving daily summary...")
-    print("=" * 70)
+    # === FILE STORAGE ===
+    print("=" * 80)
+    print("PERSISTENCE")
+    print("=" * 80)
     print()
-    filepath = tracker.save_daily_summary()
-    if filepath:
-        print(f"✅ Summary saved to: {filepath}")
-        print()
-        # Show the contents
-        with open(filepath) as f:
-            import json
+    print("✅ Usage data saved to separate files:")
+    print("  - output/api_usage_solcast.json")
+    print("  - output/api_usage_forecast.solar.json")
+    print()
+    print("Each provider has its own file, so no overwrites!")
+    print()
 
-            data = json.load(f)
-            print("File contents:")
-            print(json.dumps(data, indent=2))
-    else:
-        print("❌ Failed to save summary")
+    # === SIMULATE QUOTA EXHAUSTION ===
+    print("=" * 80)
+    print("QUOTA EXHAUSTION SCENARIO")
+    print("=" * 80)
+    print()
 
+    # Simulate making 7 more Solcast calls to approach limit
+    print("Simulating 6 more Solcast calls (to reach 10/10 limit)...")
+    for i in range(6):
+        record_api_call(
+            provider="solcast",
+            endpoint="rooftop_sites/abc123/forecasts",
+            status_code=200,
+        )
+
+    # Now check quota
+    solcast_status = tracker.get_quota_status("solcast")
+    print("\nSolcast Status After 10 Calls:")
+    print("  Calls in window: {solcast_status['calls_in_window']}/10")
+    print(f"  Remaining: {solcast_status['quota_remaining']}")
+    print(
+        f"  Status: {solcast_status['status']} "
+        f"{'⛔' if solcast_status['status'] == 'EXHAUSTED' else ''}"
+    )
     print()
-    print("=" * 70)
-    print("Demo complete!")
-    print("=" * 70)
+
+    # Try to make another call
+    can_proceed, reason = can_make_calls("solcast", num_calls=1)
+    print(f"Can make another Solcast call? {can_proceed}")
+    print(f"Reason: {reason}")
     print()
-    print("💡 Key Features:")
-    print("  • Automatic tracking of all API calls (when integrated)")
-    print("  • Captures quota information from response headers")
-    print("  • Alerts when quota is running low (1-5 calls remaining)")
-    print("  • Thread-safe for concurrent API calls")
-    print("  • Optional daily summary persistence to JSON")
+
+    # === KEY FEATURES ===
+    print("=" * 80)
+    print("KEY FEATURES DEMONSTRATED")
+    print("=" * 80)
     print()
-    print("📌 How it's used:")
-    print("  • Solcast provider automatically calls record_api_call()")
-    print("  • Integrates with forecast.solar provider (similar)")
-    print("  • Access stats: tracker.get_provider_stats('solcast')")
-    print("  • Manual recording: record_api_call(...)")
+    print("✅ Per-provider file storage (no overwrites)")
+    print("✅ Rolling window calculations (24h for Solcast, 1h for Forecast.Solar)")
+    print("✅ Accurate quota tracking (ignores Solcast's misleading headers)")
+    print("✅ Failed calls counted (they use quota too!)")
+    print("✅ Timestamp tracking for all calls")
+    print("✅ Automatic cleanup of old calls outside window")
+    print("✅ Thread-safe operations")
+    print("✅ Pre-flight checks with can_make_calls()")
+    print()
 
 
 if __name__ == "__main__":
-    demo_tracking()
+    demo_enhanced_tracking()

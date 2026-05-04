@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from modules.api_usage_tracker import get_global_tracker
 from modules.data_logger import DataLogger
 from modules.forecast import ForecastCalculator
+from modules.forecast_cache import ForecastCache
 from modules.forecast_providers import ForecastManager
 
 from .api import GrowattAPI
@@ -44,6 +45,7 @@ class GrowattCharger:
             log_dir=log_dir,
             log_file="growatt-charger.log",
             additional_fields={"app": "growatt-charger"},
+            config_path=config_path,
         )
 
         try:
@@ -52,6 +54,13 @@ class GrowattCharger:
 
             # Initialize API client
             self.api = GrowattAPI()
+
+            cache_dir = os.path.join(project_root, self.config.cache.cache_dir)
+            self.forecast_cache = ForecastCache(
+                cache_dir=cache_dir,
+                default_ttl_hours=4.0,
+                enabled=self.config.cache.enabled,  # Add to your config
+            )
 
             # Initialize forecast manager with multi-provider support
             providers_config = self.config.forecast_providers
@@ -62,6 +71,7 @@ class GrowattCharger:
                 self.config,
                 providers=providers_config.providers,
                 primary_provider=providers_config.primary_provider,
+                cache=self.forecast_cache,
             )
             self.logger.info(f"Primary provider: {providers_config.primary_provider}")
 
@@ -488,7 +498,6 @@ def main():
     finally:
         # Log API usage summary before exit
         tracker.log_summary()
-        tracker.save_daily_summary()
 
     return 0
 
