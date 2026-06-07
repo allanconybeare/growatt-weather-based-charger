@@ -11,3 +11,7 @@ Uses the default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-
 ### Domain docs
 
 Single-context layout — one `CONTEXT.md` at the repo root + `docs/adr/`. See `docs/agents/domain.md`.
+
+### Git commits
+
+Commit message format, pre-commit hook workflow, batching strategy, and safety rules for this repo. See `.agents/skills/git-commits/SKILL.md`.
