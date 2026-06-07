@@ -172,6 +172,28 @@ class ForecastConfig:
         self._validate_float_range("damping", 0, 1)
         self._validate_float_range("confidence", 0, 1)
 
+    @property
+    def latitude(self) -> Optional[float]:
+        """Parse latitude from location string (format: 'lat,lon' or place name)."""
+        try:
+            parts = self.location.split(",")
+            if len(parts) >= 2:
+                return float(parts[0].strip())
+        except (ValueError, AttributeError):
+            pass
+        return None
+
+    @property
+    def longitude(self) -> Optional[float]:
+        """Parse longitude from location string (format: 'lat,lon' or place name)."""
+        try:
+            parts = self.location.split(",")
+            if len(parts) >= 2:
+                return float(parts[1].strip())
+        except (ValueError, AttributeError):
+            pass
+        return None
+
     def _validate_float_range(self, field_name: str, min_val: float, max_val: float):
         """Validate that a float is within a specified range."""
         value = float(getattr(self, field_name))

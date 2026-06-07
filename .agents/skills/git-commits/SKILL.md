@@ -15,8 +15,8 @@ Run these **before every commit**:
 # 1. Pre-commit hooks (formatting, lint, secrets check)
 pre-commit run --files <changed files>
 
-# 2. Tests (excluding known pre-existing broken test)
-.\venv\Scripts\python.exe -m pytest -q --tb=short --ignore=test_quota_fix.py
+# 2. Tests
+.\venv\Scripts\python.exe -m pytest -q --tb=short
 ```
 
 **If any gate fails → fix it before committing. Never skip pre-commit hooks.**
@@ -24,7 +24,7 @@ pre-commit run --files <changed files>
 ## Pre-Commit Checklist
 
 - [ ] `pre-commit run` passes on all staged files
-- [ ] `pytest` passes (23+ tests, ignoring `test_quota_fix.py`)
+- [ ] `pytest` passes (all tests)
 - [ ] No credentials or API keys in code (use env vars)
 - [ ] Changes are logically grouped
 - [ ] Commit message follows format below
@@ -98,7 +98,7 @@ git add <modified files>
 pre-commit run --files <modified files>   # re-run to confirm clean
 
 # 4. Run tests
-.\venv\Scripts\python.exe -m pytest -q --ignore=test_quota_fix.py
+.\venv\Scripts\python.exe -m pytest -q --tb=short
 
 # 5. Commit
 git commit -m "<type>: <subject>"
@@ -114,7 +114,3 @@ git push origin main
 - **Never** skip pre-commit hooks (`--no-verify`)
 - **Never** commit secrets — use `GROWATT_USERNAME`, `GROWATT_PASSWORD`, `SOLCAST_API_KEY` env vars
 - If you encounter merge conflicts or unexpected state → **stop and ask the user**
-
-## Pre-Existing Known Failures
-
-`test_quota_fix.py` and `test_multi_array_config.py::test_array_parsing` fail due to pre-existing issues unrelated to new work. Always use `--ignore=test_quota_fix.py` when running pytest; the array config failure is a known attribute gap.
