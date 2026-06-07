@@ -10,6 +10,7 @@ from modules.api_usage_tracker import get_global_tracker
 from modules.data_logger import DataLogger
 from modules.forecast_cache import ForecastCache
 from modules.forecast_providers import ForecastManager
+from modules.log_maintenance import LogMaintenance
 from modules.peak_window_boost import (
     calculate_peak_window_boost_target,
     should_boost_battery_for_peak_window,
@@ -74,6 +75,14 @@ class AfternoonPeakChecker:
             # Initialize data logger
             output_dir = os.path.join(project_root, "output")
             self.data_logger = DataLogger(output_dir)
+
+            # Run log maintenance (CSV retention + cache sweep)
+            LogMaintenance(
+                output_dir=output_dir,
+                cache_dir=cache_dir,
+                retention_days=self.config.maintenance.csv_retention_days,
+                cache_max_age_days=self.config.maintenance.cache_max_age_days,
+            ).run()
 
             # Initialize state
             self.plant_id: Optional[str] = None

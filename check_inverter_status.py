@@ -19,6 +19,7 @@ import sys
 from datetime import datetime
 
 from modules.email_notifier import EmailNotifier
+from modules.log_maintenance import LogMaintenance
 from src.api import GrowattAPI
 from src.config import ConfigManager
 from src.utils import setup_logging
@@ -80,6 +81,19 @@ class InverterStatusChecker:
         except Exception as e:
             self.logger.error(f"Failed to load config: {e}")
             return 2
+
+        # Run log maintenance once per invocation
+        try:
+            config_dir = os.path.dirname(os.path.abspath(self.config_path))
+            project_root = os.path.dirname(config_dir)
+            LogMaintenance(
+                output_dir=self.output_dir,
+                cache_dir=os.path.join(project_root, config.cache.cache_dir),
+                retention_days=config.maintenance.csv_retention_days,
+                cache_max_age_days=config.maintenance.cache_max_age_days,
+            ).run()
+        except Exception as e:
+            self.logger.warning(f"Log maintenance failed (non-fatal): {e}")
 
         try:
             api = GrowattAPI()

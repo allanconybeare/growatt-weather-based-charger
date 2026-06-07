@@ -11,6 +11,7 @@ from modules.data_logger import DataLogger
 from modules.forecast import ForecastCalculator
 from modules.forecast_cache import ForecastCache
 from modules.forecast_providers import ForecastManager
+from modules.log_maintenance import LogMaintenance
 
 from .api import GrowattAPI
 from .config import ConfigManager
@@ -82,6 +83,15 @@ class GrowattCharger:
             project_root = os.path.dirname(os.path.dirname(config_path))
             output_dir = os.path.join(project_root, "output")
             self.data_logger = DataLogger(output_dir)
+
+            # Run log maintenance (CSV retention + cache sweep)
+            cache_dir = os.path.join(project_root, self.config.cache.cache_dir)
+            LogMaintenance(
+                output_dir=output_dir,
+                cache_dir=cache_dir,
+                retention_days=self.config.maintenance.csv_retention_days,
+                cache_max_age_days=self.config.maintenance.cache_max_age_days,
+            ).run()
 
             # Initialize state
             self.plant_id: Optional[str] = None

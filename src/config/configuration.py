@@ -255,6 +255,21 @@ class APIResponseCacheConfig:
         )
 
 
+@dataclass
+class MaintenanceConfig:
+    """Log file maintenance configuration."""
+
+    csv_retention_days: int
+    cache_max_age_days: int
+
+    @classmethod
+    def from_section(cls, section):
+        return cls(
+            csv_retention_days=section.getint("csv_retention_days", fallback=1095),
+            cache_max_age_days=section.getint("cache_max_age_days", fallback=7),
+        )
+
+
 class ConfigManager:
     """Configuration manager for the application."""
 
@@ -274,6 +289,11 @@ class ConfigManager:
             self.cache = APIResponseCacheConfig.from_section(self.config["cache"])
         else:
             self.cache = APIResponseCacheConfig(True, "output/cache", 4.0)
+
+        if "maintenance" in self.config:
+            self.maintenance = MaintenanceConfig.from_section(self.config["maintenance"])
+        else:
+            self.maintenance = MaintenanceConfig(csv_retention_days=1095, cache_max_age_days=7)
 
     def _load_config(self) -> None:
         """Load and validate configuration file."""

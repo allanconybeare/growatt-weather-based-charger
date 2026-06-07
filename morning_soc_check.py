@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime
 
+from modules.log_maintenance import LogMaintenance
 from src.api import GrowattAPI
 from src.config import ConfigManager
 from src.utils import setup_logging
@@ -133,6 +134,19 @@ def main():
 
     try:
         config = ConfigManager(config_path)
+
+        # Run log maintenance once per invocation
+        config_dir_m = os.path.dirname(os.path.abspath(config_path))
+        project_root_m = os.path.dirname(config_dir_m)
+        try:
+            LogMaintenance(
+                output_dir=os.path.join(project_root_m, "output"),
+                cache_dir=os.path.join(project_root_m, config.cache.cache_dir),
+                retention_days=config.maintenance.csv_retention_days,
+                cache_max_age_days=config.maintenance.cache_max_age_days,
+            ).run()
+        except Exception as _maint_err:
+            logger.warning(f"Log maintenance failed (non-fatal): {_maint_err}")
 
         # Initialize Growatt API
         api = GrowattAPI()

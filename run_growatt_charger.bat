@@ -15,6 +15,13 @@ set "MYLOGFILE=%MYLOGDIR%\scheduled_task.log"
 :: Ensure logs folder exists
 if not exist "%MYLOGDIR%" mkdir "%MYLOGDIR%"
 
+:: Housekeeping - rotate log if it exceeds 2MB (keep 2 backups)
+if exist "%MYLOGFILE%" for %%F in ("%MYLOGFILE%") do if %%~zF gtr 2097152 (
+    if exist "%MYLOGFILE%.2" del "%MYLOGFILE%.2"
+    if exist "%MYLOGFILE%.1" ren "%MYLOGFILE%.1" "scheduled_task.log.2"
+    ren "%MYLOGFILE%" "scheduled_task.log.1"
+)
+
 :: Get the directory where this batch file is located
 set "SCRIPT_DIR=%~dp0"
 

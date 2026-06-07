@@ -1,7 +1,6 @@
 import csv
 import logging
 import os
-import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
@@ -52,16 +51,6 @@ def exit_printing(output_string, logger=None):
         logger.info(f"--- Run at {dt_string} ---")
         for line in output_string:
             logger.info(line)
-
-
-def cleanup_old_logs(log_dir=LOG_DIR, max_age_days=7):
-    now = time.time()
-    cutoff = now - (max_age_days * 86400)
-
-    for fname in os.listdir(log_dir):
-        fpath = os.path.join(log_dir, fname)
-        if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
-            os.remove(fpath)
 
 
 def log_run_to_csv(

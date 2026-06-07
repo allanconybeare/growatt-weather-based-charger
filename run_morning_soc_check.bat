@@ -18,8 +18,12 @@ chcp 65001 >nul
 :: Python path
 set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
 
-:: Housekeeping - clear the log if it exceeds 100KB (100,000 bytes)
-if exist "%MYLOGFILE%" for %%F in ("%MYLOGFILE%") do if %%~zF gtr 100000 del "%MYLOGFILE%"
+:: Housekeeping - rotate log if it exceeds 2MB (keep 2 backups)
+if exist "%MYLOGFILE%" for %%F in ("%MYLOGFILE%") do if %%~zF gtr 2097152 (
+    if exist "%MYLOGFILE%.2" del "%MYLOGFILE%.2"
+    if exist "%MYLOGFILE%.1" ren "%MYLOGFILE%.1" "morning_soc.log.2"
+    ren "%MYLOGFILE%" "morning_soc.log.1"
+)
 
 :: Run your script
 "%PYTHON_EXE%" "%~dp0morning_soc_check.py" >> "%MYLOGFILE%" 2>&1
